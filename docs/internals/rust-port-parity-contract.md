@@ -1,0 +1,72 @@
+---
+parent: Internals
+---
+
+# Rust Port Parity Contract (Phase 1: SHM and the OpenXR layer)
+
+Phase 1 ports the SHM frame transport (`src/lib/SHM.cpp`) and the OpenXR API layer (`src/injectables/OpenXR*`) to Rust **without changing behavior**. This document defines "without changing behavior": Phase 1 is done when the Rust code meets every rule below, and the evidence comes from the harness described in "How parity is measured".
+
+Behavior changes, including the isolation fixes the spec calls for, belong to Phase 2 and are listed at the end. Spec: `docs/superpowers/specs/2026-11-22-rust-port-plugins-passthrough-design.md`.
+
+## Unit of parity
+
+Parity is judged on two observable outputs. Internal structure, threading, and code layout are free to differ.
+
+1. **SHM:**
+   - the byte layout of the shared header and frame slots (`SharedData`, `SharedData::Frame`, `Config`, `LayerConfig`, `VRRenderSettings`, `VRLayer`), and the name of the mapping and mutex.
+   - for the same sequence of writer actions (`Writer(luid)`, `lock`/`unlock`, `BeginFrame`, `SubmitFrame`, `SubmitEmptyFrame`, `Detach`, destruction), the result of each `Reader::MaybeGet()`: either the `Frame` fields (`mConfig`, `mLayers`, `mFenceIn`, `mIndex`, and whether `mTexture`/`mFence` are usable) or the `Frame::Error` value. This also covers `Reader::operator bool` and `OnSessionChanged()` calls.
+2. **OpenXR layer:** for each `xrEndFrame`, the list of `XrCompositionLayerQuad` the layer appends to the game's layers:
+   - count and order
+   - `pose` and `size`
+   - `subImage` (swapchain and image rect)
+   - `layerFlags` and `eyeVisibility`
+   - the `space` the quads are expressed in
+
+## Must match exactly
+
+- **SHM byte layout:** size and field offsets of every shared structure, for both 64-bit and 32-bit builds. Today C++ asserts only the total (`static_assert(SHM_SIZE == 3024)` in `src/lib/SHM.cpp`). Phase 1 adds C++ `static_assert`s on field offsets, and Rust tests that assert the same sizes and offsets. Handles stay 64-bit wide (`FixedSizeHandle`) in both builds.
+- **The constants `SHMSwapchainLength` (2) and `MaxViewCount` (16):** already enforced by `rust/crates/okb-shm/tests/matches_cpp.rs`.
+- **Mapping and mutex names:** `{ProjectReverseDomain}/{Major}.{Minor}.{Patch}.{Build}-s{SHM_SIZE:x}` plus `.mutex`.
+- **`Frame::Error` results:** the same error for the same writer actions, *including precedence*. Checks run in this order: no feeder, then GPU mismatch, then no layers, then unusable handles.
+- **Swapchain index selection:** `mFrameNumber % SHMSwapchainLength` for both reader and writer. `BeginFrame` returns `(mFrameNumber + 1) % SHMSwapchainLength`.
+- **Session semantics:** a new `mSessionID` on writer construction and on `Detach()`. `OnSessionChanged()` fires on the first `MaybeGet()` that sees a new session.
+- **Layer count and order:** one quad per VR-enabled `LayerConfig`, in SHM order.
+- **Layer flags:** `XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT`.
+- **Gaze-input focus side effects:** the same `SHM::ActiveConsumers::SetActiveInGameViewID` calls (see `VRKneeboard::GetLayers`).
+
+## Acceptable differences
+
+- **Pose:** position within 1e-5 m and orientation within 1e-5 rad of the C++ result (compare quaternions up to sign: `|dot(a, b)| ≥ 1 − 1e-5`). Quad `size` within 1e-5 m.
+- **Logging and tracing:** wording, event names, and which events are emitted (`dprint`, TraceLogging) may differ.
+- **Timing:** CPU time per call may differ, but it must not regress beyond the R4 budget (0.5 ms CPU in `xrEndFrame`).
+- **Rust-internal error handling:** may replace C++ exceptions, *as long as the observable result is the same* (for example, a C++ path that throws and terminates must still terminate in Phase 1; changing that is Phase 2).
+
+## How parity is measured
+
+Both harnesses are built in Phase 1.
+
+- **SHM differential harness:** feeds an identical script of writer actions to the C++ and the Rust writers (in-process, through `okb-ffi`) and reads back with both readers in all four writer/reader combinations. It compares every `MaybeGet()` result field by field, and compares the mapped bytes after each step. The scripts start with the scenarios in `src/tests/SHM_test.cpp` and add multi-layer frames, swapchain wrap-around, and detach and reattach.
+- **Layer recorded-frame comparison:** runs `hello_xr` with `test-feeder` publishing a fixed set of layers, once with the C++ layer and once with the Rust layer (selected by the C++/Rust layer switch). An OpenXR capture layer, or a debug trace from each layer, records the appended quads per `xrEndFrame`. Phase 1 passes when every recorded frame matches under the rules above.
+- **Unit tests:** the C++ characterization tests in `src/tests/` (`VRKneeboard_test.cpp`, `RayIntersectsRect_test.cpp`, `SHM_test.cpp`) are mirrored in Rust with the same inputs and expected values.
+
+## Known quirks (preserve in Phase 1)
+
+Characterization tests found these behaviors. They may look wrong, but Phase 1 keeps them; fixing any of them is a separate, later change.
+
+- `SemVer.ToSemVerStringCharacterization`: `ToSemVerString("1.2.3.4")` returns `"1.2.3.4"` unchanged, which is not valid SemVer. `CompareSemVer()` then logs a warning and returns `Equal` for any version it cannot parse.
+- `RayIntersectsRect.RespectsRectRotation`: a ray along the center line of an edge-on rect (yawed 90°) reports a hit. Float error tilts the plane slightly, so the ray meets it at exactly the rect center. This feeds gaze detection (`VRKneeboard::IsLookingAtKneeboard`).
+- `SHMTest.EmptyFrameCharacterization`: `Writer::SubmitEmptyFrame()` never sets `FEEDER_ATTACHED`, so readers see `NoFeeder` (not `NoLayers`) from a writer that has only submitted empty frames.
+- `SHMTest.GpuMismatchCharacterization`: the GPU check comes before the layer-count check. A reader on the wrong GPU gets `IncorrectGPU` even for a zero-layer frame, while a reader on the right GPU gets `NoLayers`. A wrong-GPU reader also skips `ActiveConsumers::Set`.
+- `VRKneeboard` (observed in code; covered by `VRKneeboard.PoseIsStableWithoutRecenter`): no recenter happens until `mRecenterCount` changes from 0. Before the first recenter, kneeboards are placed relative to the tracking-space origin, with eye height taken from the first headset pose ever seen.
+- `SHM::Writer` (observed in code): constructing a writer unconditionally resets the whole shared header, even if another writer is live.
+
+## Changes deferred to Phase 2
+
+Phase 1 must **not** fix these; each is pinned by a test or listed in the spec, and Phase 2 changes it on purpose (spec Section 2.2 and rules R1–R5):
+
+- **The blocking `INFINITE` wait:** `SHM::Reader::MaybeGet()` blocks on the cross-process mutex for as long as the writer holds it. Pinned by `SHMTest.ReaderBlocksWhileWriterHoldsLock`; Phase 2 inverts that test (lock-free reads, R1).
+- **Unbounded GPU fence waits** queued in the game's D3D11/D3D12/Vulkan queues on values the app has not yet signaled (R1).
+- **Crashes that cross into the game:** `fatal()`, `OPENKNEEBOARD_ASSERT`, and throwing `check_hresult` calls in code that runs in-game, both in the injectables and in the in-game `src/lib` code (`SHM*`, `D3D11/`, `D3D12/`, `Vulkan/`) (R2).
+- **No watchdog:** a stale app keeps its last frame on screen indefinitely (R3).
+- **No per-frame time budget** (R4), and pass-through for unknown runtime state (R5).
+- **The lock-free v2 SHM wire format:** replaces the mutex-based v1 layout above. The contract's byte-layout rules apply to v1 only.
