@@ -7,6 +7,7 @@ add_executable(
   semver_test.cpp
   RayIntersectsRect_test.cpp
   VRKneeboard_test.cpp
+  SHM_test.cpp
 )
 target_link_libraries(
   OpenKneeboard-Tests
@@ -14,6 +15,7 @@ target_link_libraries(
   GTest::gtest
   GTest::gtest_main
   OpenKneeboard-RayIntersectsRect
+  OpenKneeboard-SHM
   OpenKneeboard-VRKneeboard
   OpenKneeboard-semver
 )
