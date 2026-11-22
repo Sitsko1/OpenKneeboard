@@ -9,6 +9,7 @@ add_executable(
   VRKneeboard_test.cpp
   SHM_test.cpp
   SHMLayout_test.cpp
+  SHMParity_test.cpp
   PluginManifest_test.cpp
   VRSettings_test.cpp
   # ponytail: compiled directly rather than linking OpenKneeboard-App-Common,
@@ -20,6 +21,7 @@ target_include_directories(
   OpenKneeboard-Tests
   PRIVATE
   ../app/app-common/include
+  ../../rust/crates/okb-ffi/include
 )
 target_compile_definitions(
   OpenKneeboard-Tests
@@ -39,6 +41,7 @@ target_link_libraries(
   OpenKneeboard-config
   OpenKneeboard-json
   OpenKneeboard-semver
+  okb_ffi
   ThirdParty::CppWinRT
   ThirdParty::JSON
 )

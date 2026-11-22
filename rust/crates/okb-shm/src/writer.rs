@@ -52,6 +52,11 @@ impl Writer {
         Some(self.guard(outcome))
     }
 
+    /// C++ `Writer::GetFrameCountForMetricsOnly`; unlocked.
+    pub fn frame_count(&self) -> u64 {
+        self.mapping.read_header().frame_number
+    }
+
     fn guard(&mut self, outcome: LockOutcome) -> WriterGuard<'_> {
         if outcome == LockOutcome::Abandoned {
             // C++ `*mHeader = {}`, which also creates a fresh session ID.
