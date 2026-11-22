@@ -2,9 +2,10 @@
 //! check and a `steady_clock`-compatible clock. The only module in this crate
 //! allowed to use `unsafe`.
 #![allow(unsafe_code)]
-#![allow(dead_code)] // consumed by Writer/Reader in later tasks
 
 use std::io;
+
+use crate::wire::{SHM_SIZE, SharedData};
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_ABANDONED,
@@ -17,8 +18,8 @@ use windows_sys::Win32::Security::{
     GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
 };
 use windows_sys::Win32::System::Memory::{
-    CreateFileMappingW, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, PAGE_READWRITE,
-    UnmapViewOfFile,
+    CreateFileMappingW, FILE_MAP_WRITE, FlushViewOfFile, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
+    PAGE_READWRITE, UnmapViewOfFile,
 };
 use windows_sys::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows_sys::Win32::System::Threading::{
@@ -74,8 +75,34 @@ impl Mapping {
         ))
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "used by the Reader in a later task")
+    )]
     pub(crate) fn as_ptr(&self) -> *mut u8 {
         self.view
+    }
+
+    /// Copies the `SharedData` header out of the view. The mapping must have been opened with
+    /// `SHM_SIZE` bytes, and the caller must hold the SHM mutex (or be the sole user).
+    pub(crate) fn read_header(&self) -> SharedData {
+        const { assert!(align_of::<SharedData>() <= 4096) }
+        // SAFETY: the view is page-aligned and at least `SHM_SIZE == size_of::<SharedData>()`
+        // bytes (asserted by the caller contract); every field is a plain integer, float or
+        // bool, and cross-process access is serialized by the SHM mutex.
+        unsafe { self.view.cast::<SharedData>().read() }
+    }
+
+    /// Copies `header` into the view. Same preconditions as [`Self::read_header`].
+    pub(crate) fn write_header(&self, header: &SharedData) {
+        // SAFETY: as in `read_header`; the view was opened writable.
+        unsafe { self.view.cast::<SharedData>().write(*header) }
+    }
+
+    /// `FlushViewOfFile` over the whole header, as the C++ `Writer::Detach` does.
+    pub(crate) fn flush(&self) {
+        // SAFETY: `view` is a live mapped view of at least `SHM_SIZE` bytes.
+        unsafe { FlushViewOfFile(self.view.cast(), SHM_SIZE) };
     }
 }
 
@@ -163,6 +190,7 @@ pub(crate) fn session_id() -> u64 {
     (u64::from(pid) << 32) | u64::from(u32::from_ne_bytes(r))
 }
 
+#[expect(dead_code, reason = "used by the Reader in a later task")]
 pub(crate) fn is_elevated() -> bool {
     let mut token: HANDLE = std::ptr::null_mut();
     // SAFETY: the pseudo-handle is always valid; `token` is a valid out pointer.
@@ -186,10 +214,18 @@ pub(crate) fn is_elevated() -> bool {
     ok != 0 && elevation.TokenIsElevated != 0
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "used by the Reader in a later task")
+)]
 fn qpc_to_ns(qpc: i64, freq: i64) -> i64 {
     (qpc / freq) * 1_000_000_000 + (qpc % freq) * 1_000_000_000 / freq
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "used by the Reader in a later task")
+)]
 fn qpc() -> (i64, i64) {
     let (mut c, mut f) = (0i64, 0i64);
     // SAFETY: both out pointers are valid; these calls cannot fail on supported Windows.
@@ -201,6 +237,10 @@ fn qpc() -> (i64, i64) {
 }
 
 /// Matches MSVC `std::chrono::steady_clock::now()` in nanoseconds.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "used by the Reader in a later task")
+)]
 pub(crate) fn steady_clock_now_ns() -> i64 {
     let (c, f) = qpc();
     qpc_to_ns(c, f)
@@ -247,6 +287,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "used by the Reader in a later task")
+    )]
     fn qpc_to_ns_fixed_inputs() {
         assert_eq!(
             qpc_to_ns(1_234_567_890_123, 10_000_000),

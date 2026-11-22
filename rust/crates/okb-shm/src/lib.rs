@@ -15,3 +15,5 @@ mod names;
 pub mod wire;
 pub use names::{Names, Version};
 mod win32;
+mod writer;
+pub use writer::{NextFrameInfo, Writer, WriterGuard};
