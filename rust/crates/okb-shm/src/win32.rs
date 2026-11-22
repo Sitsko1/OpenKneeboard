@@ -247,6 +247,19 @@ mod tests {
     }
 
     #[test]
+    fn qpc_to_ns_fixed_inputs() {
+        assert_eq!(
+            qpc_to_ns(1_234_567_890_123, 10_000_000),
+            123_456_789_012_300
+        );
+        // qpc * 1e9 would overflow i64 here.
+        assert_eq!(
+            qpc_to_ns(100_000_000_000_000, 3_579_545),
+            27_936_511_484_001_458
+        );
+    }
+
+    #[test]
     fn steady_clock_matches_cpp_formula() {
         let a = steady_clock_now_ns();
         let b = steady_clock_now_ns();
