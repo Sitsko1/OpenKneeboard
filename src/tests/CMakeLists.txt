@@ -6,6 +6,7 @@ add_executable(
   TraceProvider.cpp
   semver_test.cpp
   RayIntersectsRect_test.cpp
+  VRKneeboard_test.cpp
 )
 target_link_libraries(
   OpenKneeboard-Tests
@@ -13,6 +14,7 @@ target_link_libraries(
   GTest::gtest
   GTest::gtest_main
   OpenKneeboard-RayIntersectsRect
+  OpenKneeboard-VRKneeboard
   OpenKneeboard-semver
 )
 # DISCOVERY_MODE PRE_TEST: discovery runs at ctest time, so a build never
