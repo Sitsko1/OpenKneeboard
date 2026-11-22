@@ -206,8 +206,13 @@ that the origin comes from the references instead of the headset:
 - Masks use `maskPose * referenceOrigin`, where `referenceOrigin` is also
   **gravity-aligned (yaw + translation only)**, so it is the same kind of transform as
   `mRecenter`. Masks follow normal headset tracking like kneeboards do.
-- Alignment moves **masks only**; kneeboards keep today's Recenter unchanged
-  (my call).
+- **"Move kneeboards with masks" option** (decided by owner): when on, kneeboard poses
+  use `referenceOrigin` in place of `mRecenter`, so kneeboards stay fixed to the
+  real world alongside the mask and are re-positioned by every alignment. When off,
+  kneeboards keep today's Recenter behavior. My calls: default **off**, so existing
+  users see no change; one global setting, not per view; Recenter while the option is
+  on re-runs alignment if possible, and otherwise keeps the last good `referenceOrigin`.
+  If no alignment exists yet, kneeboards fall back to `mRecenter`.
 
 **Data flow (my call):** editor and aligner save JSON in the plugin's storage folder;
 the passthrough plugin (WASM) loads it and publishes the mask polygons and the
