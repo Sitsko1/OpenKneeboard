@@ -4,12 +4,14 @@
 #![allow(unsafe_code)]
 
 use std::io;
+pub(crate) use std::os::windows::io::OwnedHandle;
+use std::os::windows::io::{AsRawHandle, FromRawHandle};
 
-use crate::wire::SharedData;
+use crate::wire::{ActiveConsumers, SharedData};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_ABANDONED,
-    WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_ALREADY_EXISTS, GetLastError,
+    HANDLE, INVALID_HANDLE_VALUE, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Cryptography::{
     BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom,
@@ -23,8 +25,8 @@ use windows_sys::Win32::System::Memory::{
 };
 use windows_sys::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows_sys::Win32::System::Threading::{
-    CreateMutexW, GetCurrentProcess, GetCurrentProcessId, INFINITE, OpenProcessToken, ReleaseMutex,
-    WaitForSingleObject,
+    CreateMutexW, GetCurrentProcess, GetCurrentProcessId, INFINITE, OpenProcess, OpenProcessToken,
+    PROCESS_DUP_HANDLE, ReleaseMutex, WaitForSingleObject,
 };
 
 fn wide(s: &str) -> Vec<u16> {
@@ -106,12 +108,44 @@ impl Mapping {
         unsafe { self.view.cast::<SharedData>().write(*header) }
     }
 
+    /// Copies the `ActiveConsumers` struct out of the view (no lock, as in C++).
+    ///
+    /// # Panics
+    /// If the mapping is smaller than `ActiveConsumers`.
+    pub(crate) fn read_active_consumers(&self) -> ActiveConsumers {
+        assert!(self.size >= size_of::<ActiveConsumers>());
+        // SAFETY: the view is page-aligned and large enough (asserted above); `ActiveConsumers`
+        // is integers only, so valid for every bit pattern a peer may write. A concurrent
+        // writer may tear the copy, exactly as the unlocked C++ `*p` copy may.
+        unsafe { self.view.cast::<ActiveConsumers>().read() }
+    }
+
+    /// Writes `value` at byte `offset` of the view without touching neighboring bytes, so
+    /// unlocked peers writing other fields (as the C++ `ActiveConsumers` does) are not
+    /// clobbered.
+    ///
+    /// # Panics
+    /// If the write would be out of bounds or misaligned.
+    pub(crate) fn write_at<T: Copy>(&self, offset: usize, value: T) {
+        assert!(offset + size_of::<T>() <= self.size);
+        assert!(offset.is_multiple_of(align_of::<T>()));
+        // SAFETY: in bounds and aligned (asserted; the view itself is page-aligned); the view
+        // is writable; no Rust reference into the view exists, so no aliasing is violated.
+        unsafe { self.view.add(offset).cast::<T>().write(value) }
+    }
+
     /// `FlushViewOfFile` over the whole header, as the C++ `Writer::Detach` does.
     pub(crate) fn flush(&self) {
         // SAFETY: `view` is a live mapped view of at least `size_of::<SharedData>()` bytes.
         unsafe { FlushViewOfFile(self.view.cast(), size_of::<SharedData>()) };
     }
 }
+
+// SAFETY: the mapping handle and view address are process-wide (no thread affinity), and
+// every accessor copies data in or out through raw pointers without handing out references,
+// so moving a `Mapping` to another thread (e.g. into the process-wide ActiveConsumers cache)
+// is sound.
+unsafe impl Send for Mapping {}
 
 impl Drop for Mapping {
     fn drop(&mut self) {
@@ -197,7 +231,6 @@ pub(crate) fn session_id() -> u64 {
     (u64::from(pid) << 32) | u64::from(u32::from_ne_bytes(r))
 }
 
-#[expect(dead_code, reason = "used by the Reader in a later task")]
 pub(crate) fn is_elevated() -> bool {
     let mut token: HANDLE = std::ptr::null_mut();
     // SAFETY: the pseudo-handle is always valid; `token` is a valid out pointer.
@@ -221,18 +254,10 @@ pub(crate) fn is_elevated() -> bool {
     ok != 0 && elevation.TokenIsElevated != 0
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the Reader in a later task")
-)]
 fn qpc_to_ns(qpc: i64, freq: i64) -> i64 {
     (qpc / freq) * 1_000_000_000 + (qpc % freq) * 1_000_000_000 / freq
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the Reader in a later task")
-)]
 fn qpc() -> (i64, i64) {
     let (mut c, mut f) = (0i64, 0i64);
     // SAFETY: both out pointers are valid; these calls cannot fail on supported Windows.
@@ -244,13 +269,72 @@ fn qpc() -> (i64, i64) {
 }
 
 /// Matches MSVC `std::chrono::steady_clock::now()` in nanoseconds.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the Reader in a later task")
-)]
 pub(crate) fn steady_clock_now_ns() -> i64 {
     let (c, f) = qpc();
     qpc_to_ns(c, f)
+}
+
+/// `OpenProcess(PROCESS_DUP_HANDLE, FALSE, pid)`; `None` on failure (e.g. pid 0 or exited).
+pub(crate) fn open_process_for_dup(pid: u32) -> Option<OwnedHandle> {
+    // SAFETY: plain call; the result is checked before use.
+    let h = unsafe { OpenProcess(PROCESS_DUP_HANDLE, 0, pid) };
+    // SAFETY: `h` is a fresh, owned, non-null process handle.
+    (!h.is_null()).then(|| unsafe { OwnedHandle::from_raw_handle(h) })
+}
+
+/// `DuplicateHandle(from, handle, GetCurrentProcess(), ..., DUPLICATE_SAME_ACCESS)`.
+pub(crate) fn duplicate_handle(from: &OwnedHandle, handle: u64) -> io::Result<OwnedHandle> {
+    let mut out: HANDLE = std::ptr::null_mut();
+    // SAFETY: `from` is a live process handle with PROCESS_DUP_HANDLE; `handle` is a value in
+    // that process's handle table, which the kernel validates; `out` is a valid out pointer.
+    let ok = unsafe {
+        DuplicateHandle(
+            from.as_raw_handle(),
+            handle as usize as HANDLE,
+            GetCurrentProcess(),
+            &mut out,
+            0,
+            0,
+            DUPLICATE_SAME_ACCESS,
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: on success `out` is a new handle owned by this process.
+    Ok(unsafe { OwnedHandle::from_raw_handle(out) })
+}
+
+/// The raw value of `h`, as stored in the wire `FixedSizeHandle`.
+pub(crate) fn raw(h: &OwnedHandle) -> u64 {
+    h.as_raw_handle() as usize as u64
+}
+
+#[cfg(test)]
+pub(crate) fn create_event() -> OwnedHandle {
+    // SAFETY: null attributes and name are allowed.
+    let h = unsafe {
+        windows_sys::Win32::System::Threading::CreateEventW(
+            std::ptr::null(),
+            0,
+            0,
+            std::ptr::null(),
+        )
+    };
+    assert!(!h.is_null(), "{}", io::Error::last_os_error());
+    // SAFETY: fresh owned handle.
+    unsafe { OwnedHandle::from_raw_handle(h) }
+}
+
+#[cfg(test)]
+pub(crate) fn same_object(a: u64, b: u64) -> bool {
+    // SAFETY: plain call on handle values; invalid values just compare unequal.
+    unsafe {
+        windows_sys::Win32::Foundation::CompareObjectHandles(
+            a as usize as HANDLE,
+            b as usize as HANDLE,
+        ) != 0
+    }
 }
 
 #[cfg(test)]
@@ -294,10 +378,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the Reader in a later task")
-    )]
     fn qpc_to_ns_fixed_inputs() {
         assert_eq!(
             qpc_to_ns(1_234_567_890_123, 10_000_000),
