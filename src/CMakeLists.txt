@@ -59,3 +59,7 @@ endif ()
 add_subdirectory(dcs-hook)
 add_subdirectory(utilities)
 add_subdirectory(app)
+
+if (OPENKNEEBOARD_BUILD_TESTS)
+  add_subdirectory(tests)
+endif ()

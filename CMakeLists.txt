@@ -128,6 +128,12 @@ endif ()
 
 set(CMAKE_CONFIGURATION_TYPES Debug RelWithDebInfo)
 
+option(OPENKNEEBOARD_BUILD_TESTS "Build automated tests (adds the 'tests' vcpkg feature)" OFF)
+if (OPENKNEEBOARD_BUILD_TESTS)
+  # Must be set before project(), which runs the vcpkg toolchain install
+  list(APPEND VCPKG_MANIFEST_FEATURES "tests")
+endif ()
+
 project(OpenKneeboard VERSION 1.13.0.${VERSION_BUILD} LANGUAGES CXX C)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(smol_binaries)
@@ -245,6 +251,10 @@ add_subdirectory("third-party")
 if (ENABLE_APP)
   add_subdirectory("scripts")
   add_subdirectory("data")
+endif ()
+if (OPENKNEEBOARD_BUILD_TESTS)
+  # Before add_subdirectory("src"), which adds src/tests
+  enable_testing()
 endif ()
 add_subdirectory("src")
 
