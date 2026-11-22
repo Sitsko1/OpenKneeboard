@@ -11,4 +11,7 @@ pub const SWAPCHAIN_LENGTH: usize = 2;
 /// Mirrors `MaxViewCount` in `src/lib/include/OpenKneeboard/config.in.hpp`.
 pub const MAX_VIEW_COUNT: usize = 16;
 
+mod names;
 pub mod wire;
+pub use names::{Names, Version};
+mod win32;
