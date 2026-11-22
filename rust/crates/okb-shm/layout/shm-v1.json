@@ -1,0 +1,139 @@
+{
+  "structs": {
+    "ActiveConsumers": {
+      "align": 8,
+      "fields": {
+        "mActiveViewID": 64,
+        "mElevatedConsumerProcessID": 40,
+        "mGlobalInputViewID": 56,
+        "mNonVRPixelSize": 44,
+        "mOpenVR": 0,
+        "mOpenXR_D3D11": 8,
+        "mOpenXR_D3D12": 16,
+        "mOpenXR_Vulkan2": 24,
+        "mViewer": 32
+      },
+      "size": 72
+    },
+    "Config": {
+      "align": 8,
+      "fields": {
+        "mGlobalInputLayerID": 0,
+        "mTextureSize": 24,
+        "mTint": 32,
+        "mVR": 8
+      },
+      "size": 48
+    },
+    "Frame": {
+      "align": 8,
+      "fields": {
+        "mConfig": 24,
+        "mFence": 8,
+        "mLayerCount": 1480,
+        "mLayers": 72,
+        "mReadyReadFenceValue": 16,
+        "mTexture": 0
+      },
+      "size": 1488
+    },
+    "GazeTargetScale": {
+      "align": 4,
+      "fields": {
+        "mHorizontal": 4,
+        "mVertical": 0
+      },
+      "size": 8
+    },
+    "LayerConfig": {
+      "align": 8,
+      "fields": {
+        "mLayerID": 0,
+        "mVR": 12,
+        "mVREnabled": 8
+      },
+      "size": 88
+    },
+    "PixelRect": {
+      "align": 4,
+      "fields": {
+        "mOffset": 0,
+        "mOrigin": 16,
+        "mSize": 8
+      },
+      "size": 20
+    },
+    "PixelSize": {
+      "align": 4,
+      "fields": {
+        "mHeight": 4,
+        "mWidth": 0
+      },
+      "size": 8
+    },
+    "Quirks": {
+      "align": 4,
+      "fields": {
+        "mOpenXR_Upscaling": 0
+      },
+      "size": 4
+    },
+    "SharedData": {
+      "align": 8,
+      "fields": {
+        "mFeederProcessID": 36,
+        "mFlags": 32,
+        "mFrameNumber": 16,
+        "mFrames": 48,
+        "mGPULUID": 8,
+        "mMagic": 0,
+        "mPadding": 40,
+        "mSessionID": 24
+      },
+      "size": 3024
+    },
+    "VRLayer": {
+      "align": 4,
+      "fields": {
+        "mEnableGazeZoom": 32,
+        "mGazeTargetScale": 40,
+        "mLocationOnTexture": 56,
+        "mOpacity": 48,
+        "mPhysicalSize": 24,
+        "mPose": 0,
+        "mZoomScale": 36
+      },
+      "size": 76
+    },
+    "VROpacitySettings": {
+      "align": 4,
+      "fields": {
+        "mGaze": 4,
+        "mNormal": 0
+      },
+      "size": 8
+    },
+    "VRPose": {
+      "align": 4,
+      "fields": {
+        "mEyeY": 4,
+        "mRX": 12,
+        "mRY": 16,
+        "mRZ": 20,
+        "mX": 0,
+        "mZ": 8
+      },
+      "size": 24
+    },
+    "VRRenderSettings": {
+      "align": 8,
+      "fields": {
+        "mEnableGazeInputFocus": 4,
+        "mForceZoom": 5,
+        "mQuirks": 0,
+        "mRecenterCount": 8
+      },
+      "size": 16
+    }
+  }
+}
