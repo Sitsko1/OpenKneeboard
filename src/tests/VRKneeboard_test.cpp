@@ -132,3 +132,16 @@ TEST(VRKneeboard, HeadMovementWithoutRecenterDoesNotMoveKneeboard) {
   const auto b = f.Get(kb, Hmd({0.5f, 1.7f, 0}));
   ExpectNear(a, b);
 }
+
+TEST(VRKneeboard, FirstFrameDoesNotRecenter) {
+  // No recenter happens until mRecenterCount changes from 0: a first frame at
+  // (1,1.7,2) yaw 45 places the kneeboard exactly like a first frame at the
+  // origin (same eye height, so Y matches too). Known quirk in the parity
+  // contract.
+  Fixture f;
+  TestableVRKneeboard atOrigin;
+  TestableVRKneeboard offset;
+  const auto a = f.Get(atOrigin, Hmd({0, 1.7f, 0}));
+  const auto b = f.Get(offset, Hmd({1, 1.7f, 2}, 45));
+  ExpectNear(a, b);
+}
