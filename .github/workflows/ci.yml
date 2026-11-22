@@ -9,6 +9,9 @@ on:
       - "*.props"
       - "*.cmake"
       - "CMakeLists.txt"
+      - "rust/**"
+      - "scripts/coverage-*.ps1"
+      - "vcpkg.json"
       - ".github/workflows/ci.yml"
   push:
     paths:
@@ -19,6 +22,9 @@ on:
       - "*.props"
       - "*.cmake"
       - "CMakeLists.txt"
+      - "rust/**"
+      - "scripts/coverage-*.ps1"
+      - "vcpkg.json"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
 permissions:
@@ -35,7 +41,7 @@ jobs:
       matrix:
         include:
           - triplet: x64-windows-openkneeboard
-            extra: ""
+            extra: "--x-feature=tests"
           - triplet: x86-windows-static
             extra: "--x-no-default-features"
     steps:
@@ -60,6 +66,35 @@ jobs:
             -Source "${{ env.FEED_URL }}"
       - name: "Install dependencies"
         run: third-party/vcpkg/vcpkg install --triplet ${{matrix.triplet}} --clean-after-build ${{matrix.extra}}
+  rust:
+    name: Rust
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-llvm-cov
+      - run: cargo clippy --all-targets
+      - run: cargo fmt --check
+      - name: Run tests with coverage
+        run: |
+          $out = ../scripts/coverage-rust.ps1
+          $code = $LASTEXITCODE
+          $out
+          $out | Select-String '^Rust line coverage' | Add-Content $env:GITHUB_STEP_SUMMARY
+          exit $code
+      - name: Upload Rust coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-rust
+          path: rust/target/coverage-rust.xml
   build:
     name: Build (${{matrix.config}})
     needs: populate-vcpkg-cache
@@ -96,6 +131,7 @@ jobs:
           cmake ${{github.workspace}}/source `
             -B ${{github.workspace}}/build `
             --preset vcpkg `
+            "-DOPENKNEEBOARD_BUILD_TESTS=${{ matrix.config == 'Debug' && 'ON' || 'OFF' }}" `
             "-DSOURCELINK=https://raw.githubusercontent.com/${{github.repository}}/${{github.sha}}"
       - name: Build
         id: build
@@ -113,6 +149,27 @@ jobs:
           $version="$(Get-Content version.txt)"
           Add-Content $Env:GITHUB_OUTPUT "VERSION=${version}"
           echo "::endgroup::"
+      - name: Install OpenCppCoverage
+        if: ${{ matrix.config == 'Debug' }}
+        shell: pwsh
+        run: |
+          choco install opencppcoverage --no-progress -y
+          Add-Content $env:GITHUB_PATH "C:\Program Files\OpenCppCoverage"
+      - name: Run C++ tests with coverage
+        if: ${{ matrix.config == 'Debug' }}
+        shell: pwsh
+        run: |
+          $out = source/scripts/coverage-cpp.ps1 -BuildDir ${{github.workspace}}/build -Config Debug
+          $code = $LASTEXITCODE
+          $out
+          $out | Select-String '^C\+\+ line coverage' | Add-Content $env:GITHUB_STEP_SUMMARY
+          exit $code
+      - name: Upload C++ coverage
+        if: ${{ matrix.config == 'Debug' && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-cpp
+          path: build/coverage-cpp.xml
       - name: Attach debug symbols
         if: ${{ matrix.config != 'Debug' && github.repository == 'OpenKneeboard/OpenKneeboard' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')) }}
         uses: actions/upload-artifact@v7
