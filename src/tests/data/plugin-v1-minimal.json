@@ -1,0 +1,18 @@
+{
+  "ID": "minimal.openkneeboard-tests.invalid",
+  "Metadata": {
+    "PluginName": "Minimal Plugin",
+    "PluginReadableVersion": "1",
+    "PluginSemanticVersion": "1.0.0"
+  },
+  "TabTypes": [
+    {
+      "ID": "minimal.openkneeboard-tests.invalid;tab",
+      "Name": "Minimal Tab",
+      "Implementation": "WebBrowser",
+      "ImplementationArgs": {
+        "URI": "https://openkneeboard-tests.invalid/"
+      }
+    }
+  ]
+}
