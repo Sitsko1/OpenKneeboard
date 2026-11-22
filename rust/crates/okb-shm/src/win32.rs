@@ -5,7 +5,7 @@
 
 use std::io;
 
-use crate::wire::{SHM_SIZE, SharedData};
+use crate::wire::SharedData;
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_ABANDONED,
@@ -35,6 +35,7 @@ fn wide(s: &str) -> Vec<u16> {
 pub(crate) struct Mapping {
     handle: HANDLE,
     view: *mut u8,
+    size: usize,
 }
 
 impl Mapping {
@@ -70,6 +71,7 @@ impl Mapping {
             Self {
                 handle,
                 view: view.Value.cast(),
+                size,
             },
             created,
         ))
@@ -83,26 +85,31 @@ impl Mapping {
         self.view
     }
 
-    /// Copies the `SharedData` header out of the view. The mapping must have been opened with
-    /// `SHM_SIZE` bytes, and the caller must hold the SHM mutex (or be the sole user).
+    /// Copies the `SharedData` header out of the view. The caller must hold the SHM mutex (or
+    /// be the sole user).
+    ///
+    /// # Panics
+    /// If the mapping is smaller than `SharedData`.
     pub(crate) fn read_header(&self) -> SharedData {
-        const { assert!(align_of::<SharedData>() <= 4096) }
-        // SAFETY: the view is page-aligned and at least `SHM_SIZE == size_of::<SharedData>()`
-        // bytes (asserted by the caller contract); every field is a plain integer, float or
-        // bool, and cross-process access is serialized by the SHM mutex.
+        assert!(self.size >= size_of::<SharedData>());
+        // SAFETY: the view is page-aligned and at least `size_of::<SharedData>()` bytes
+        // (asserted above). `SharedData` is plain old data (integers, floats and `CBool`
+        // bytes), valid for every bit pattern, so a peer's writes cannot make this read UB;
+        // cross-process access is serialized by the SHM mutex.
         unsafe { self.view.cast::<SharedData>().read() }
     }
 
-    /// Copies `header` into the view. Same preconditions as [`Self::read_header`].
+    /// Copies `header` into the view. Same contract as [`Self::read_header`].
     pub(crate) fn write_header(&self, header: &SharedData) {
+        assert!(self.size >= size_of::<SharedData>());
         // SAFETY: as in `read_header`; the view was opened writable.
         unsafe { self.view.cast::<SharedData>().write(*header) }
     }
 
     /// `FlushViewOfFile` over the whole header, as the C++ `Writer::Detach` does.
     pub(crate) fn flush(&self) {
-        // SAFETY: `view` is a live mapped view of at least `SHM_SIZE` bytes.
-        unsafe { FlushViewOfFile(self.view.cast(), SHM_SIZE) };
+        // SAFETY: `view` is a live mapped view of at least `size_of::<SharedData>()` bytes.
+        unsafe { FlushViewOfFile(self.view.cast(), size_of::<SharedData>()) };
     }
 }
 

@@ -13,6 +13,27 @@ pub const SHM_SIZE: usize = 3024;
 
 const _: () = assert!(size_of::<SharedData>() == SHM_SIZE);
 
+/// C++ `bool`: one byte. Any bit pattern is accepted and read as `!= 0`, so wire structs stay
+/// valid for every byte sequence a peer process may write.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CBool(pub u8);
+
+impl CBool {
+    pub const TRUE: Self = Self(1);
+    pub const FALSE: Self = Self(0);
+
+    pub const fn get(self) -> bool {
+        self.0 != 0
+    }
+}
+
+impl From<bool> for CBool {
+    fn from(b: bool) -> Self {
+        Self(u8::from(b))
+    }
+}
+
 /// C++ `SHM::Wire::HeaderFlags` (`ULONG`).
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -164,8 +185,8 @@ pub struct Quirks {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VrRenderSettings {
     pub quirks: Quirks,
-    pub enable_gaze_input_focus: bool,
-    pub force_zoom: bool,
+    pub enable_gaze_input_focus: CBool,
+    pub force_zoom: CBool,
     pub recenter_count: u64,
 }
 
@@ -173,8 +194,8 @@ impl Default for VrRenderSettings {
     fn default() -> Self {
         Self {
             quirks: Quirks::default(),
-            enable_gaze_input_focus: true,
-            force_zoom: false,
+            enable_gaze_input_focus: CBool::TRUE,
+            force_zoom: CBool::FALSE,
             recenter_count: 0,
         }
     }
@@ -186,7 +207,7 @@ impl Default for VrRenderSettings {
 pub struct VrLayer {
     pub pose: VrPose,
     pub physical_size: SizeF32,
-    pub enable_gaze_zoom: bool,
+    pub enable_gaze_zoom: CBool,
     pub zoom_scale: f32,
     pub gaze_target_scale: GazeTargetScale,
     pub opacity: VrOpacitySettings,
@@ -198,7 +219,7 @@ impl Default for VrLayer {
         Self {
             pose: VrPose::default(),
             physical_size: SizeF32::default(),
-            enable_gaze_zoom: true,
+            enable_gaze_zoom: CBool::TRUE,
             zoom_scale: 2.0,
             gaze_target_scale: GazeTargetScale::default(),
             opacity: VrOpacitySettings::default(),
@@ -233,7 +254,7 @@ impl Default for Config {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LayerConfig {
     pub layer_id: u64,
-    pub vr_enabled: bool,
+    pub vr_enabled: CBool,
     pub vr: VrLayer,
 }
 

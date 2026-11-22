@@ -119,8 +119,8 @@ impl WriterGuard<'_> {
         header.feeder_process_id = w.process_id;
         header.frame_number += 1;
         let idx = header.frame_number as usize % SWAPCHAIN_LENGTH;
-        debug_assert_eq!(idx, usize::from(info.texture_index));
-        debug_assert_eq!(w.ready_read_fence_value, info.fence_out);
+        assert_eq!(idx, usize::from(info.texture_index));
+        assert_eq!(w.ready_read_fence_value, info.fence_out);
 
         let mut frame = Frame {
             texture: FixedSizeHandle(texture),
@@ -175,7 +175,7 @@ mod tests {
     fn layer(id: u64) -> LayerConfig {
         LayerConfig {
             layer_id: id,
-            vr_enabled: true,
+            vr_enabled: true.into(),
             ..LayerConfig::default()
         }
     }
@@ -279,5 +279,15 @@ mod tests {
         let info = g.begin_frame();
         let layers = vec![LayerConfig::default(); MAX_VIEW_COUNT + 1];
         g.submit_frame(info, &Config::default(), &layers, 0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion `left == right` failed")]
+    fn submit_frame_panics_on_mismatched_texture_index() {
+        let (mut w, _) = writer("badindex", 1);
+        let mut g = w.lock();
+        let mut info = g.begin_frame();
+        info.texture_index ^= 1;
+        g.submit_frame(info, &Config::default(), &[], 0, 0);
     }
 }
