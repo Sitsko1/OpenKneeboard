@@ -126,12 +126,28 @@ impl Mapping {
     ///
     /// # Panics
     /// If the write would be out of bounds or misaligned.
-    pub(crate) fn write_at<T: Copy>(&self, offset: usize, value: T) {
-        assert!(offset + size_of::<T>() <= self.size);
-        assert!(offset.is_multiple_of(align_of::<T>()));
+    pub(crate) fn write_at<T: Scalar>(&self, offset: usize, value: T) {
+        let end = offset.checked_add(size_of::<T>());
+        assert!(
+            end.is_some_and(|end| end <= self.size),
+            "write out of bounds"
+        );
+        assert!(offset.is_multiple_of(align_of::<T>()), "misaligned write");
         // SAFETY: in bounds and aligned (asserted; the view itself is page-aligned); the view
-        // is writable; no Rust reference into the view exists, so no aliasing is violated.
+        // is writable; `T: Scalar` is a padding-free integer, so every written byte is
+        // initialized; no Rust reference into the view exists, so no aliasing is violated.
         unsafe { self.view.add(offset).cast::<T>().write(value) }
+    }
+
+    /// Zeroes the `ActiveConsumers` byte range (C++ `*mView = {}`; the default is all zeros).
+    ///
+    /// # Panics
+    /// If the mapping is smaller than `ActiveConsumers`.
+    pub(crate) fn zero_active_consumers(&self) {
+        assert!(self.size >= size_of::<ActiveConsumers>());
+        // SAFETY: in bounds (asserted) and writable. `write_bytes` sets every byte, padding
+        // included, to 0, so no uninitialized byte reaches the view.
+        unsafe { self.view.write_bytes(0, size_of::<ActiveConsumers>()) }
     }
 
     /// `FlushViewOfFile` over the whole header, as the C++ `Writer::Detach` does.
@@ -140,6 +156,19 @@ impl Mapping {
         unsafe { FlushViewOfFile(self.view.cast(), size_of::<SharedData>()) };
     }
 }
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// Padding-free integer types that [`Mapping::write_at`] may write.
+pub(crate) trait Scalar: Copy + sealed::Sealed {}
+impl sealed::Sealed for u32 {}
+impl sealed::Sealed for u64 {}
+impl sealed::Sealed for i64 {}
+impl Scalar for u32 {}
+impl Scalar for u64 {}
+impl Scalar for i64 {}
 
 // SAFETY: the mapping handle and view address are process-wide (no thread affinity), and
 // every accessor copies data in or out through raw pointers without handing out references,

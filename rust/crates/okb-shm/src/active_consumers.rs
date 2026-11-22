@@ -36,7 +36,7 @@ fn with_entry(names: &Names, f: impl FnOnce(&mut Entry)) {
             let (mapping, created) =
                 Mapping::open(&names.active_consumers, size_of::<ActiveConsumers>()).ok()?;
             if created {
-                mapping.write_at(0, ActiveConsumers::default());
+                mapping.zero_active_consumers();
             }
             Some(Entry {
                 mapping,
