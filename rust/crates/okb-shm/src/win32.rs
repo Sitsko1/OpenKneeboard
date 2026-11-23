@@ -102,8 +102,8 @@ impl Mapping {
         unsafe { self.view.add(offset).write_bytes(byte, self.size - offset) }
     }
 
-    /// Copies the `SharedData` header out of the view. The caller must hold the SHM mutex (or
-    /// be the sole user).
+    /// Copies the `SharedData` header out of the view. Callers normally hold the SHM mutex, but
+    /// some read unlocked, as C++ does; a concurrent writer may then tear the copy.
     ///
     /// # Panics
     /// If the mapping is smaller than `SharedData`.
@@ -111,8 +111,9 @@ impl Mapping {
         assert!(self.size >= size_of::<SharedData>());
         // SAFETY: the view is page-aligned and at least `size_of::<SharedData>()` bytes
         // (asserted above). `SharedData` is plain old data (integers, floats and `CBool`
-        // bytes), valid for every bit pattern, so a peer's writes cannot make this read UB;
-        // cross-process access is serialized by the SHM mutex.
+        // bytes), valid for every bit pattern, so a peer's writes cannot make this read UB. An
+        // unlocked read may observe a torn copy, exactly as the unlocked C++ read may; that is
+        // not a validity problem.
         unsafe { self.view.cast::<SharedData>().read() }
     }
 

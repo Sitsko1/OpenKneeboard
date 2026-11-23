@@ -311,8 +311,9 @@ mod tests {
         }
     }
 
-    // C++ value-initializes the header and frame, so padding is zero; the Rust writer used to
-    // copy stack garbage there (found by SHMParity.* in src/tests/SHMParity_test.cpp).
+    // The Rust writer writes zero padding (it used to copy stack garbage, found by SHMParity.*
+    // in src/tests/SHMParity_test.cpp). C++'s trailing Frame padding is indeterminate
+    // (SubmitFrame copies a temporary), which is why the parity harness masks it.
     #[test]
     fn padding_bytes_are_written_as_zero() {
         let (mut w, _) = writer("padding", 1);

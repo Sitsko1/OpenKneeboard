@@ -280,7 +280,8 @@ pub struct Frame {
     pub layers: [LayerConfig; MAX_VIEW_COUNT],
     pub layer_count: u32,
     /// C++ implicit padding, explicit here so every byte is initialized and copied verbatim
-    /// (as C++ copies its padding); zero by default, as C++ value-initialization leaves it.
+    /// (as C++ copies its padding). Rust writes zero; C++'s trailing Frame padding is
+    /// indeterminate (`SubmitFrame` copies a temporary), so the parity harness masks it.
     pub padding: [u8; 4],
 }
 
