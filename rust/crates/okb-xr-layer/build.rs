@@ -19,6 +19,9 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         println!("cargo:rustc-cdylib-link-arg=/DEF:{dir}/OpenKneeboard-OpenXR-Rust.def");
+        // CMake ships the PDB renamed; make the debug directory name match.
+        let bits = std::env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap();
+        println!("cargo:rustc-cdylib-link-arg=/PDBALTPATH:OpenKneeboard-OpenXR-Rust{bits}.pdb");
     }
     compile_sprite_shaders();
 }
