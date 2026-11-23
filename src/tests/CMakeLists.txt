@@ -7,6 +7,7 @@ add_executable(
   semver_test.cpp
   RayIntersectsRect_test.cpp
   VRKneeboard_test.cpp
+  VRKneeboardParity_test.cpp
   SHM_test.cpp
   SHMLayout_test.cpp
   SHMParity_test.cpp

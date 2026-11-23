@@ -13,3 +13,4 @@ workspace = true
 
 [dependencies]
 okb-shm = { path = "../okb-shm" }
+okb-vr = { path = "../okb-vr" }

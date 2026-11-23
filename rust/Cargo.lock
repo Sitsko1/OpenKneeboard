@@ -19,6 +19,7 @@ name = "okb-ffi"
 version = "0.1.0"
 dependencies = [
  "okb-shm",
+ "okb-vr",
 ]
 
 [[package]]
@@ -27,6 +28,13 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "windows-sys",
+]
+
+[[package]]
+name = "okb-vr"
+version = "0.1.0"
+dependencies = [
+ "okb-shm",
 ]
 
 [[package]]

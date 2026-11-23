@@ -1,5 +1,6 @@
 /*
- * C ABI over okb-shm (rust/crates/okb-shm), for the C++ test harness.
+ * C ABI over okb-shm and okb-vr (rust/crates/okb-shm, rust/crates/okb-vr), for the
+ * C++ test harness.
  *
  * Handles are opaque and not thread-safe: use each one only on the thread
  * that created it. Every function aborts the process if the Rust side panics
@@ -38,6 +39,11 @@ typedef struct OkbShmReader OkbShmReader;
  * An okb-shm `Writer` plus the lock state of the C++ "Lockable" interface (`OkbShmWriter`).
  */
 typedef struct OkbShmWriter OkbShmWriter;
+
+/**
+ * C++ `VRKneeboard`: per-session kneeboard placement state.
+ */
+typedef struct OkbVrKneeboard OkbVrKneeboard;
 
 /**
  * C++ `Writer::NextFrameInfo`.
@@ -208,6 +214,52 @@ typedef struct OkbFrame {
   uint8_t index;
 } OkbFrame;
 
+/**
+ * SimpleMath `Vector3`.
+ */
+typedef struct OkbVec3 {
+  float x;
+  float y;
+  float z;
+} OkbVec3;
+
+/**
+ * SimpleMath `Quaternion`; `Default` is the identity, as its C++ default constructor.
+ */
+typedef struct OkbQuat {
+  float x;
+  float y;
+  float z;
+  float w;
+} OkbQuat;
+
+/**
+ * C++ `VRKneeboard::Pose`; `Default` is C++ `Pose {}`: origin, identity orientation.
+ */
+typedef struct OkbPose {
+  struct OkbVec3 position;
+  struct OkbQuat orientation;
+} OkbPose;
+
+/**
+ * SimpleMath `Vector2`.
+ */
+typedef struct OkbVec2 {
+  float x;
+  float y;
+} OkbVec2;
+
+/**
+ * One `okb_vr::VrLayer`: `layer_index` is the layer's index in the input array.
+ */
+typedef struct OkbVrLayerOut {
+  uint32_t layer_index;
+  struct OkbPose kneeboard_pose;
+  struct OkbVec2 kneeboard_size;
+  float kneeboard_opacity;
+  bool is_looking_at_kneeboard;
+} OkbVrLayerOut;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -359,6 +411,45 @@ bool okb_shm_reader_has_feeder(struct OkbShmReader *reader);
  * `reader` is a live `OkbShmReader` on its creating thread; `out` is valid for writes.
  */
 int32_t okb_shm_reader_maybe_get(struct OkbShmReader *reader, struct OkbFrame *out);
+
+/**
+ * C++ `VRKneeboard`. Free with `okb_vr_kneeboard_free`.
+ */
+struct OkbVrKneeboard *okb_vr_kneeboard_new(void);
+
+/**
+ * # Safety
+ * `kb` is null or from `okb_vr_kneeboard_new`, and not used afterward.
+ */
+void okb_vr_kneeboard_free(struct OkbVrKneeboard *kb);
+
+/**
+ * C++ `VRKneeboard::GetLayers`. Writes `*out_count` layers to `out`, and to `*active_view`
+ * the ID C++ would pass to `SHM::ActiveConsumers::SetActiveInGameViewID` (0 for `{}`), or
+ * `UINT64_MAX` if it would not call it. Aborts if `count` exceeds 16.
+ *
+ * # Safety
+ * `kb` is a live `OkbVrKneeboard` on its creating thread; `config` is a valid `OkbConfig`;
+ * `layers` points to `count` `OkbLayerConfig`s (may be null if `count` is 0); `out` is valid
+ * for 16 writes; `out_count` and `active_view` are valid for writes.
+ */
+void okb_vr_kneeboard_get_layers(struct OkbVrKneeboard *kb,
+                                 const struct OkbConfig *config,
+                                 const struct OkbLayerConfig *layers,
+                                 size_t count,
+                                 struct OkbPose hmd,
+                                 struct OkbVrLayerOut *out,
+                                 uint32_t *out_count,
+                                 uint64_t *active_view);
+
+/**
+ * C++ `RayIntersectsRect`.
+ */
+bool okb_ray_intersects_rect(struct OkbVec3 ray_origin,
+                             struct OkbQuat ray_orientation,
+                             struct OkbVec3 rect_center,
+                             struct OkbQuat rect_orientation,
+                             struct OkbVec2 rect_size);
 
 #ifdef __cplusplus
 }  // extern "C"
