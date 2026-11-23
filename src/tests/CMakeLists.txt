@@ -13,6 +13,8 @@ add_executable(
   SHMLayout_test.cpp
   SHMParity_test.cpp
   OpenXRLayerLoad_test.cpp
+  OpenXRLayerHarness.cpp
+  OpenXRLayerParity_test.cpp
   PluginManifest_test.cpp
   VRSettings_test.cpp
   # ponytail: compiled directly rather than linking OpenKneeboard-App-Common,
@@ -53,6 +55,8 @@ target_link_libraries(
   ThirdParty::OpenXR
   ThirdParty::CppWinRT
   ThirdParty::JSON
+  d3d11
+  dxgi
 )
 # DISCOVERY_MODE PRE_TEST: discovery runs at ctest time, so a build never
 # fails because the freshly linked test binary can't start.
