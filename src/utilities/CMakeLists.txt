@@ -112,6 +112,7 @@ add_helper_executable(
 target_link_libraries(
   OpenKneeboard-OpenXR-Helper
   PRIVATE
+  OpenKneeboard-OpenXRLayerRegistry
   OpenKneeboard-RuntimeFiles
   OpenKneeboard-dprint
 )

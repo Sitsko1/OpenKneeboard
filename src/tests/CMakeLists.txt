@@ -17,8 +17,10 @@ add_executable(
   OpenXRLayerParity_test.cpp
   PluginManifest_test.cpp
   VRSettings_test.cpp
+  OpenXRLayerRegistry_test.cpp
   # ponytail: compiled directly rather than linking OpenKneeboard-App-Common,
   # which drags in the Windows App SDK, CEF, and more.
+  ../app/app-common/AppSettings.cpp
   ../app/app-common/Plugin.cpp
   ../app/app-common/VRSettings.cpp
 )
@@ -49,14 +51,15 @@ target_link_libraries(
   OpenKneeboard-VRKneeboard
   OpenKneeboard-config
   OpenKneeboard-json
+  OpenKneeboard-OpenXRLayerRegistry
   OpenKneeboard-semver
   OpenKneeboard-version
   okb_ffi
   ThirdParty::OpenXR
   ThirdParty::CppWinRT
   ThirdParty::JSON
-  d3d11
-  dxgi
+  System::D3d11
+  System::Dxgi
 )
 # DISCOVERY_MODE PRE_TEST: discovery runs at ctest time, so a build never
 # fails because the freshly linked test binary can't start.

@@ -28,6 +28,14 @@ OPENKNEEBOARD_DEFINE_SPARSE_JSON(
   AppSettings::Deprecated::DualKneeboardSettings,
   mEnabled)
 
+// Unknown strings map to the first entry, `Cpp`
+NLOHMANN_JSON_SERIALIZE_ENUM(
+  OpenXRLayerImplementation,
+  {
+    {OpenXRLayerImplementation::Cpp, "Cpp"},
+    {OpenXRLayerImplementation::Rust, "Rust"},
+  })
+
 template <>
 void from_json_postprocess<AppSettings>(
   const nlohmann::json& j,
@@ -79,6 +87,7 @@ OPENKNEEBOARD_DEFINE_SPARSE_JSON(
   AppSettings,
   mAutoUpdate,
   mLastRunVersion,
-  mAlwaysShowDeveloperTools)
+  mAlwaysShowDeveloperTools,
+  mOpenXRLayer)
 
 }// namespace OpenKneeboard

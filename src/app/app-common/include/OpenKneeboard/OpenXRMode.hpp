@@ -6,6 +6,7 @@
 // OpenKneeboard repository.
 #pragma once
 
+#include <OpenKneeboard/AppSettings.hpp>
 #include <OpenKneeboard/task.hpp>
 
 #include <shims/winrt/base.h>
@@ -22,7 +23,11 @@ enum class OpenXRMode {
   AllUsers,
 };
 
-task<void> SetOpenXR64ModeWithHelperProcess(OpenXRMode newMode);
+task<void> SetOpenXR64ModeWithHelperProcess(
+  OpenXRMode newMode,
+  OpenXRLayerImplementation impl);
 
-task<void> SetOpenXR32ModeWithHelperProcess(OpenXRMode newMode);
+task<void> SetOpenXR32ModeWithHelperProcess(
+  OpenXRMode newMode,
+  OpenXRLayerImplementation impl);
 }// namespace OpenKneeboard

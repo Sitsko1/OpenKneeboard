@@ -27,30 +27,37 @@ static auto LaunchAndWaitForOpenXRHelperSubprocess(
   return RunSubprocessAsync(exePath, commandLine, runas);
 }
 
-task<void> SetOpenXR64ModeWithHelperProcess(OpenXRMode mode) {
+static task<void> SetModeWithHelperProcess(
+  std::wstring_view bitness,
+  OpenXRMode mode,
+  OpenXRLayerImplementation impl) {
   switch (mode) {
     case OpenXRMode::Disabled:
+      // Disables both implementations
       co_await LaunchAndWaitForOpenXRHelperSubprocess(
-        RunAs::Administrator, L"disable-HKLM-64");
+        RunAs::Administrator, std::format(L"disable-HKLM-{}", bitness));
       break;
     case OpenXRMode::AllUsers:
       co_await LaunchAndWaitForOpenXRHelperSubprocess(
-        RunAs::Administrator, L"enable-HKLM-64");
+        RunAs::Administrator,
+        std::format(
+          L"enable-HKLM-{}{}",
+          bitness,
+          impl == OpenXRLayerImplementation::Rust ? L"-rust" : L""));
       break;
   }
 }
 
-task<void> SetOpenXR32ModeWithHelperProcess(OpenXRMode mode) {
-  switch (mode) {
-    case OpenXRMode::Disabled:
-      co_await LaunchAndWaitForOpenXRHelperSubprocess(
-        RunAs::Administrator, L"disable-HKLM-32");
-      break;
-    case OpenXRMode::AllUsers:
-      co_await LaunchAndWaitForOpenXRHelperSubprocess(
-        RunAs::Administrator, L"enable-HKLM-32");
-      break;
-  }
+task<void> SetOpenXR64ModeWithHelperProcess(
+  OpenXRMode mode,
+  OpenXRLayerImplementation impl) {
+  return SetModeWithHelperProcess(L"64", mode, impl);
+}
+
+task<void> SetOpenXR32ModeWithHelperProcess(
+  OpenXRMode mode,
+  OpenXRLayerImplementation impl) {
+  return SetModeWithHelperProcess(L"32", mode, impl);
 }
 
 }// namespace OpenKneeboard
