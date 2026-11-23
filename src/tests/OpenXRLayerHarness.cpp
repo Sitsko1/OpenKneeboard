@@ -10,6 +10,7 @@
 #include <OpenKneeboard/SHM/ActiveConsumers.hpp>
 
 #include <OpenKneeboard/config.hpp>
+#include <OpenKneeboard/scope_exit.hpp>
 
 #include <shims/winrt/base.h>
 
@@ -232,6 +233,7 @@ constexpr uint32_t SwapchainImageCount = 3;
 
 struct FakeSwapchain {
   int mOrdinal {};
+  int64_t mFormat {};
   uint32_t mWidth {};
   uint32_t mHeight {};
   std::vector<winrt::com_ptr<ID3D11Texture2D>> mImages;
@@ -244,19 +246,37 @@ struct State {
   const HarnessScript& mScript;
   const Device& mDevice;
   const HarnessStep* mStep {};
+  const XrFrameEndInfo* mGameEndInfo {};
   std::vector<const XrCompositionLayerBaseHeader*> mGameLayers;
   std::map<uint64_t, XrReferenceSpaceType> mSpaces;
   std::map<uint64_t, FakeSwapchain> mSwapchains;
   uint64_t mNextHandle {0x10000};
   std::vector<uint8_t> mReleasedPixels;
   uint32_t mReleasedWidth {};
+  int64_t mReleasedFormat {};
   std::vector<RecordedFrame> mFrames;
+  // The fakes never throw: a C++ exception must not unwind through the layer's
+  // frames (UB for the Rust layer). They record the first error here and
+  // return an XrResult; the driver rethrows it once the layer call returns.
+  std::string mError;
 };
 
 // ponytail: one run at a time; the layer under test keeps global state too.
 State* gState {nullptr};
 
 namespace Fake {
+
+XrResult Fail(std::string_view what) {
+  if (gState->mError.empty()) {
+    gState->mError = std::format("OpenXR layer harness: fake runtime: {}", what);
+  }
+  return XR_ERROR_RUNTIME_FAILURE;
+}
+
+FakeSwapchain* FindSwapchain(XrSwapchain swapchain) {
+  const auto it = gState->mSwapchains.find(FromHandle(swapchain));
+  return it == gState->mSwapchains.end() ? nullptr : &it->second;
+}
 
 XRAPI_ATTR XrResult XRAPI_CALL
 xrGetInstanceProcAddr(XrInstance, const char* name, PFN_xrVoidFunction*);
@@ -320,6 +340,9 @@ XRAPI_ATTR XrResult XRAPI_CALL xrDestroySpace(XrSpace space) {
 
 XRAPI_ATTR XrResult XRAPI_CALL
 xrLocateSpace(XrSpace, XrSpace, XrTime, XrSpaceLocation* location) {
+  if (!gState->mStep) {
+    return Fail("xrLocateSpace outside a step");
+  }
   location->locationFlags = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT
     | XR_SPACE_LOCATION_POSITION_VALID_BIT;
   location->pose = gState->mStep->mHmdPose;
@@ -359,6 +382,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(
   const auto& device = gState->mDevice;
   FakeSwapchain sc {
     .mOrdinal = static_cast<int>(gState->mSwapchains.size()),
+    .mFormat = info->format,
     .mWidth = info->width,
     .mHeight = info->height,
   };
@@ -373,17 +397,18 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(
     .BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
   };
   for (uint32_t i = 0; i < SwapchainImageCount; ++i) {
-    CheckHR(
-      device.mDevice->CreateTexture2D(
-        &desc, nullptr, sc.mImages.emplace_back().put()),
-      "CreateTexture2D(swapchain)");
+    if (FAILED(device.mDevice->CreateTexture2D(
+          &desc, nullptr, sc.mImages.emplace_back().put()))) {
+      return Fail("CreateTexture2D(swapchain)");
+    }
   }
   desc.Usage = D3D11_USAGE_STAGING;
   desc.BindFlags = 0;
   desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-  CheckHR(
-    device.mDevice->CreateTexture2D(&desc, nullptr, sc.mStaging.put()),
-    "CreateTexture2D(staging)");
+  if (FAILED(
+        device.mDevice->CreateTexture2D(&desc, nullptr, sc.mStaging.put()))) {
+    return Fail("CreateTexture2D(staging)");
+  }
 
   const auto handle = gState->mNextHandle++;
   gState->mSwapchains.emplace(handle, std::move(sc));
@@ -403,7 +428,10 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateSwapchainImages(
   uint32_t capacity,
   uint32_t* count,
   XrSwapchainImageBaseHeader* images) {
-  const auto& sc = gState->mSwapchains.at(FromHandle(swapchain));
+  const auto sc = FindSwapchain(swapchain);
+  if (!sc) {
+    return Fail("xrEnumerateSwapchainImages: unknown swapchain");
+  }
   *count = SwapchainImageCount;
   if (capacity == 0) {
     return XR_SUCCESS;
@@ -413,7 +441,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateSwapchainImages(
   }
   const auto d3d = reinterpret_cast<XrSwapchainImageD3D11KHR*>(images);
   for (uint32_t i = 0; i < SwapchainImageCount; ++i) {
-    d3d[i].texture = sc.mImages.at(i).get();
+    d3d[i].texture = sc->mImages[i].get();
   }
   return XR_SUCCESS;
 }
@@ -422,10 +450,13 @@ XRAPI_ATTR XrResult XRAPI_CALL xrAcquireSwapchainImage(
   XrSwapchain swapchain,
   const XrSwapchainImageAcquireInfo*,
   uint32_t* index) {
-  auto& sc = gState->mSwapchains.at(FromHandle(swapchain));
-  sc.mAcquired = sc.mNextImage;
-  sc.mNextImage = (sc.mNextImage + 1) % SwapchainImageCount;
-  *index = sc.mAcquired;
+  const auto sc = FindSwapchain(swapchain);
+  if (!sc) {
+    return Fail("xrAcquireSwapchainImage: unknown swapchain");
+  }
+  sc->mAcquired = sc->mNextImage;
+  sc->mNextImage = (sc->mNextImage + 1) % SwapchainImageCount;
+  *index = sc->mAcquired;
   return XR_SUCCESS;
 }
 
@@ -437,11 +468,17 @@ xrWaitSwapchainImage(XrSwapchain, const XrSwapchainImageWaitInfo*) {
 XRAPI_ATTR XrResult XRAPI_CALL xrReleaseSwapchainImage(
   XrSwapchain swapchain,
   const XrSwapchainImageReleaseInfo*) {
-  auto& sc = gState->mSwapchains.at(FromHandle(swapchain));
+  const auto found = FindSwapchain(swapchain);
+  if (!found) {
+    return Fail("xrReleaseSwapchainImage: unknown swapchain");
+  }
+  auto& sc = *found;
   const auto& ctx = gState->mDevice.mContext;
-  ctx->CopyResource(sc.mStaging.get(), sc.mImages.at(sc.mAcquired).get());
+  ctx->CopyResource(sc.mStaging.get(), sc.mImages[sc.mAcquired].get());
   D3D11_MAPPED_SUBRESOURCE mapped {};
-  CheckHR(ctx->Map(sc.mStaging.get(), 0, D3D11_MAP_READ, 0, &mapped), "Map");
+  if (FAILED(ctx->Map(sc.mStaging.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+    return Fail("Map(staging)");
+  }
   const auto rowBytes = sc.mWidth * 4;
   gState->mReleasedPixels.resize(rowBytes * sc.mHeight);
   for (uint32_t y = 0; y < sc.mHeight; ++y) {
@@ -452,6 +489,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrReleaseSwapchainImage(
   }
   ctx->Unmap(sc.mStaging.get(), 0);
   gState->mReleasedWidth = sc.mWidth;
+  gState->mReleasedFormat = sc.mFormat;
   return XR_SUCCESS;
 }
 
@@ -473,12 +511,21 @@ const char* SpaceName(const XrSpace space) {
 XRAPI_ATTR XrResult XRAPI_CALL
 xrEndFrame(XrSession, const XrFrameEndInfo* info) {
   const auto& game = gState->mGameLayers;
+  const auto gameInfo = gState->mGameEndInfo;
+  if (!gameInfo) {
+    return Fail("xrEndFrame outside a step");
+  }
   RecordedFrame frame {
-    .mGameLayersForwardedUnchanged = info->layerCount >= game.size()
+    .mGameLayersForwardedUnchanged = info->type == gameInfo->type
+      && info->next == gameInfo->next
+      && info->displayTime == gameInfo->displayTime
+      && info->environmentBlendMode == gameInfo->environmentBlendMode
+      && info->layerCount >= game.size()
       && std::equal(game.begin(), game.end(), info->layers),
     .mLayerCount = info->layerCount,
     .mSwapchainPixels = std::exchange(gState->mReleasedPixels, {}),
     .mSwapchainWidth = std::exchange(gState->mReleasedWidth, 0),
+    .mSwapchainFormat = std::exchange(gState->mReleasedFormat, 0),
   };
   for (auto i = static_cast<uint32_t>(game.size()); i < info->layerCount; ++i) {
     if (info->layers[i]->type != XR_TYPE_COMPOSITION_LAYER_QUAD) {
@@ -486,14 +533,13 @@ xrEndFrame(XrSession, const XrFrameEndInfo* info) {
     }
     const auto& quad =
       *reinterpret_cast<const XrCompositionLayerQuad*>(info->layers[i]);
-    const auto sc =
-      gState->mSwapchains.find(FromHandle(quad.subImage.swapchain));
+    const auto sc = FindSwapchain(quad.subImage.swapchain);
     frame.mQuads.push_back({
       .mPose = quad.pose,
       .mSize = quad.size,
-      .mSwapchainOrdinal =
-        (sc == gState->mSwapchains.end()) ? -1 : sc->second.mOrdinal,
+      .mSwapchainOrdinal = sc ? sc->mOrdinal : -1,
       .mImageRect = quad.subImage.imageRect,
+      .mImageArrayIndex = quad.subImage.imageArrayIndex,
       .mFlags = quad.layerFlags,
       .mEye = quad.eyeVisibility,
       .mSpace = SpaceName(quad.space),
@@ -628,20 +674,31 @@ std::vector<RecordedFrame> RunHarness(
   strncpy_s(
     instanceInfo.applicationInfo.applicationName, "OKBLayerHarness", _TRUNCATE);
   instanceInfo.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
+  // Rethrows a fake-runtime error once the layer call has returned.
+  const auto checkLayerCall = [&state](XrResult result, std::string_view what) {
+    if (!state.mError.empty()) {
+      throw std::runtime_error(std::exchange(state.mError, {}));
+    }
+    CheckXR(result, what);
+  };
+
   XrInstance instance {};
-  CheckXR(
+  checkLayerCall(
     request.createApiLayerInstance(&instanceInfo, &layerCreateInfo, &instance),
     "createApiLayerInstance");
 
   const auto gipa = request.getInstanceProcAddr;
+  const auto layerDestroyInstance =
+    GetLayerFn<PFN_xrDestroyInstance>(gipa, instance, "xrDestroyInstance");
+  // If the driver throws, still tear the layer down before FreeLibrary.
+  const scope_fail destroyInstanceOnThrow {
+    [&] { layerDestroyInstance(instance); }};
   const auto layerCreateSession =
     GetLayerFn<PFN_xrCreateSession>(gipa, instance, "xrCreateSession");
   const auto layerEndFrame =
     GetLayerFn<PFN_xrEndFrame>(gipa, instance, "xrEndFrame");
   const auto layerDestroySession =
     GetLayerFn<PFN_xrDestroySession>(gipa, instance, "xrDestroySession");
-  const auto layerDestroyInstance =
-    GetLayerFn<PFN_xrDestroyInstance>(gipa, instance, "xrDestroyInstance");
 
   XrGraphicsBindingD3D11KHR binding {
     .type = XR_TYPE_GRAPHICS_BINDING_D3D11_KHR,
@@ -653,12 +710,20 @@ std::vector<RecordedFrame> RunHarness(
     .systemId = SystemId,
   };
   XrSession session {};
-  CheckXR(
+  checkLayerCall(
     layerCreateSession(instance, &sessionInfo, &session), "xrCreateSession");
+  const scope_fail destroySessionOnThrow {
+    [&] { layerDestroySession(session); }};
+
+  // Opaque to the layer and the fake: only its address is compared.
+  const XrBaseInStructure endInfoNext {.type = XR_TYPE_UNKNOWN};
 
   ///// Steps /////
-  for (const auto& step: script.mSteps) {
+  for (size_t stepIndex = 0; stepIndex < script.mSteps.size(); ++stepIndex) {
+    const auto& step = script.mSteps[stepIndex];
     state.mStep = &step;
+    SHM::ActiveConsumers::SetActiveInGameViewID(
+      ActiveInGameViewSentinel(stepIndex));
     {
       std::unique_lock lock(writer);
       if (step.mDetach) {
@@ -687,22 +752,27 @@ std::vector<RecordedFrame> RunHarness(
     }
     const XrFrameEndInfo endInfo {
       .type = XR_TYPE_FRAME_END_INFO,
-      .displayTime = step.mDisplayTime,
-      .environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
+      .next = &endInfoNext,
+      .displayTime =
+        step.mDisplayTime.value_or(static_cast<XrTime>(stepIndex + 1)),
+      .environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND,
       .layerCount = step.mGameLayerCount,
       .layers = state.mGameLayers.data(),
     };
+    state.mGameEndInfo = &endInfo;
     const auto framesBefore = state.mFrames.size();
-    CheckXR(layerEndFrame(session, &endInfo), "xrEndFrame");
+    checkLayerCall(layerEndFrame(session, &endInfo), "xrEndFrame");
+    state.mGameEndInfo = nullptr;
     Check(
       state.mFrames.size() == framesBefore + 1,
       "the layer did not call the runtime's xrEndFrame exactly once");
     state.mFrames.back().mActiveInGameViewID =
       SHM::ActiveConsumers::Get().mActiveViewID;
   }
+  state.mStep = nullptr;
 
-  CheckXR(layerDestroySession(session), "xrDestroySession");
-  CheckXR(layerDestroyInstance(instance), "xrDestroyInstance");
+  checkLayerCall(layerDestroySession(session), "xrDestroySession");
+  checkLayerCall(layerDestroyInstance(instance), "xrDestroyInstance");
   return std::move(state.mFrames);
 }
 
