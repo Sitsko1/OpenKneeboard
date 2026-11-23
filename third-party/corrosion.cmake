@@ -46,3 +46,7 @@ corrosion_set_env_vars(
   "OKB_VERSION_BUILD=${VERSION_BUILD}"
   "OKB_FXC=${FXC_EXE}"
 )
+
+# The Rust standard library and crates statically linked into the layer DLLs.
+include(ok_add_license_file)
+ok_add_license_file(LICENSE-Rust-crates.txt "LICENSE-ThirdParty-Rust-crates.txt")
