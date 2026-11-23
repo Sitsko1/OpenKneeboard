@@ -19,6 +19,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <numbers>
+#include <set>
+#include <string_view>
 
 using namespace OpenKneeboard;
 using namespace OpenKneeboard::Tests;
@@ -39,8 +41,18 @@ SHM::Config MakeConfig(const HarnessScript& script) {
   return {.mTextureSize = script.mSourceTextureSize};
 }
 
+// CI sets OKB_REQUIRE_D3D11_HARNESS=1 so the parity gate cannot silently
+// turn into skips.
+bool HarnessRequired() {
+  const auto* value = std::getenv("OKB_REQUIRE_D3D11_HARNESS");
+  return value && std::string_view {value} == "1";
+}
+
 #define SKIP_IF_UNSUPPORTED() \
   if (!HarnessSupported()) { \
+    if (HarnessRequired()) { \
+      FAIL() << HarnessSkipMessage << ", and OKB_REQUIRE_D3D11_HARNESS=1"; \
+    } \
     GTEST_SKIP() << HarnessSkipMessage; \
   } \
   ::testing::Test::RecordProperty("d3d11_adapter", HarnessAdapterDescription());
@@ -131,6 +143,7 @@ TEST(CppLayer, NoFeederPassesThrough) {
   const auto frames = RunHarness(CppLayer, script);
   ASSERT_EQ(frames.size(), 1);
   EXPECT_TRUE(frames.front().mGameLayersForwardedUnchanged);
+  EXPECT_TRUE(frames.front().mGameLayersPointerForwarded);
   EXPECT_EQ(frames.front().mLayerCount, 1);
   EXPECT_TRUE(frames.front().mQuads.empty());
   EXPECT_TRUE(frames.front().mSwapchainPixels.empty());
@@ -201,11 +214,57 @@ void ExpectQuadNear(const RecordedQuad& cpp, const RecordedQuad& rust) {
   EXPECT_EQ(cpp.mSpace, rust.mSpace);
 }
 
+// At most one swapchain is alive: each atlas resize destroys the previous
+// swapchain before creating the next, and by session end every swapchain has
+// been destroyed exactly once.
+void ExpectSwapchainLifecycle(const std::vector<SwapchainEvent>& events) {
+  std::set<int> alive;
+  int created = 0;
+  for (size_t i = 0; i < events.size(); ++i) {
+    const auto& event = events[i];
+    SCOPED_TRACE(
+      testing::Message() << "swapchain event " << i << " (frame "
+                         << event.mFrameCount << ")");
+    if (event.mCreated) {
+      EXPECT_TRUE(alive.empty())
+        << "swapchain " << event.mOrdinal << " created while swapchain "
+        << *alive.begin() << " is still alive";
+      EXPECT_EQ(event.mOrdinal, created++);
+      alive.insert(event.mOrdinal);
+    } else {
+      EXPECT_TRUE(alive.erase(event.mOrdinal))
+        << "destroyed swapchain " << event.mOrdinal << ", which is not alive";
+    }
+  }
+  EXPECT_TRUE(alive.empty()) << alive.size()
+                             << " swapchain(s) not destroyed by session end";
+}
+
 // Runs the script through both layers; returns the C++ frames for any
 // script-specific checks.
 std::vector<RecordedFrame> ExpectParity(const HarnessScript& script) {
-  const auto cpp = RunHarness(CppLayer, script);
-  const auto rust = RunHarness(RustLayer, script);
+  std::vector<SwapchainEvent> cppEvents;
+  std::vector<SwapchainEvent> rustEvents;
+  const auto cpp = RunHarness(CppLayer, script, &cppEvents);
+  const auto rust = RunHarness(RustLayer, script, &rustEvents);
+  {
+    SCOPED_TRACE("C++ layer");
+    ExpectSwapchainLifecycle(cppEvents);
+  }
+  {
+    SCOPED_TRACE("Rust layer");
+    ExpectSwapchainLifecycle(rustEvents);
+  }
+  EXPECT_EQ(cppEvents.size(), rustEvents.size());
+  for (size_t i = 0; i < std::min(cppEvents.size(), rustEvents.size()); ++i) {
+    const auto& c = cppEvents[i];
+    const auto& r = rustEvents[i];
+    EXPECT_TRUE(c == r) << "swapchain event " << i << ": C++ "
+                        << (c.mCreated ? "create " : "destroy ") << c.mOrdinal
+                        << " at frame " << c.mFrameCount << ", Rust "
+                        << (r.mCreated ? "create " : "destroy ") << r.mOrdinal
+                        << " at frame " << r.mFrameCount;
+  }
   EXPECT_EQ(cpp.size(), script.mSteps.size());
   EXPECT_EQ(cpp.size(), rust.size());
   for (size_t i = 0; i < std::min(cpp.size(), rust.size()); ++i) {
@@ -213,6 +272,7 @@ std::vector<RecordedFrame> ExpectParity(const HarnessScript& script) {
     const auto& c = cpp[i];
     const auto& r = rust[i];
     EXPECT_EQ(c.mGameLayersForwardedUnchanged, r.mGameLayersForwardedUnchanged);
+    EXPECT_EQ(c.mGameLayersPointerForwarded, r.mGameLayersPointerForwarded);
     EXPECT_EQ(c.mLayerCount, r.mLayerCount);
     EXPECT_EQ(c.mQuads.size(), r.mQuads.size());
     for (size_t q = 0; q < std::min(c.mQuads.size(), r.mQuads.size()); ++q) {
@@ -366,6 +426,8 @@ TEST(RustLayerParity, NoFeederPassThrough) {
   script.mSteps = {attached, {.mDetach = true}, attached};
   const auto cpp = ExpectParity(script);
   ASSERT_EQ(cpp.size(), 3);
+  EXPECT_FALSE(cpp[0].mGameLayersPointerForwarded);
+  EXPECT_TRUE(cpp[1].mGameLayersPointerForwarded);
   EXPECT_TRUE(cpp[1].mQuads.empty());
   EXPECT_EQ(cpp[2].mQuads.size(), 1);
 }
@@ -380,6 +442,7 @@ TEST(RustLayerParity, ZeroGameLayersPassThrough) {
   });
   const auto cpp = ExpectParity(script);
   ASSERT_EQ(cpp.size(), 1);
+  EXPECT_TRUE(cpp[0].mGameLayersPointerForwarded);
   EXPECT_EQ(cpp[0].mLayerCount, 0);
 }
 

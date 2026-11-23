@@ -255,6 +255,8 @@ struct State {
   uint32_t mReleasedWidth {};
   int64_t mReleasedFormat {};
   std::vector<RecordedFrame> mFrames;
+  std::vector<SwapchainEvent> mSwapchainEvents;
+  bool mSessionDestroyed {false};
   // The fakes never throw: a C++ exception must not unwind through the layer's
   // frames (UB for the Rust layer). They record the first error here and
   // return an XrResult; the driver rethrows it once the layer call returns.
@@ -316,6 +318,7 @@ xrCreateSession(XrInstance, const XrSessionCreateInfo*, XrSession* session) {
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL xrDestroySession(XrSession) {
+  gState->mSessionDestroyed = true;
   return XR_SUCCESS;
 }
 
@@ -410,6 +413,10 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(
     return Fail("CreateTexture2D(staging)");
   }
 
+  gState->mSwapchainEvents.push_back(
+    {.mCreated = true,
+     .mOrdinal = sc.mOrdinal,
+     .mFrameCount = gState->mFrames.size()});
   const auto handle = gState->mNextHandle++;
   gState->mSwapchains.emplace(handle, std::move(sc));
   *swapchain = ToHandle<XrSwapchain>(handle);
@@ -418,9 +425,18 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(
 
 XRAPI_ATTR XrResult XRAPI_CALL xrDestroySwapchain(XrSwapchain swapchain) {
   // Kept: ordinals are creation order, and quads refer to it by handle.
-  return gState->mSwapchains.contains(FromHandle(swapchain))
-    ? XR_SUCCESS
-    : XR_ERROR_HANDLE_INVALID;
+  const auto sc = FindSwapchain(swapchain);
+  if (!sc) {
+    return Fail("xrDestroySwapchain: unknown swapchain");
+  }
+  if (gState->mSessionDestroyed) {
+    return Fail("xrDestroySwapchain after xrDestroySession");
+  }
+  gState->mSwapchainEvents.push_back(
+    {.mCreated = false,
+     .mOrdinal = sc->mOrdinal,
+     .mFrameCount = gState->mFrames.size()});
+  return XR_SUCCESS;
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateSwapchainImages(
@@ -522,6 +538,7 @@ xrEndFrame(XrSession, const XrFrameEndInfo* info) {
       && info->environmentBlendMode == gameInfo->environmentBlendMode
       && info->layerCount >= game.size()
       && std::equal(game.begin(), game.end(), info->layers),
+    .mGameLayersPointerForwarded = info->layers == gameInfo->layers,
     .mLayerCount = info->layerCount,
     .mSwapchainPixels = std::exchange(gState->mReleasedPixels, {}),
     .mSwapchainWidth = std::exchange(gState->mReleasedWidth, 0),
@@ -612,7 +629,8 @@ std::string HarnessAdapterDescription() {
 
 std::vector<RecordedFrame> RunHarness(
   const std::filesystem::path& layerDll,
-  const HarnessScript& script) {
+  const HarnessScript& script,
+  std::vector<SwapchainEvent>* swapchainEvents) {
   Check(HarnessSupported(), HarnessSkipMessage);
   const auto device = CreateDevice(ProbeResult()->first);
   Check(device.has_value(), "D3D11CreateDevice");
@@ -773,6 +791,9 @@ std::vector<RecordedFrame> RunHarness(
 
   checkLayerCall(layerDestroySession(session), "xrDestroySession");
   checkLayerCall(layerDestroyInstance(instance), "xrDestroyInstance");
+  if (swapchainEvents) {
+    *swapchainEvents = std::move(state.mSwapchainEvents);
+  }
   return std::move(state.mFrames);
 }
 

@@ -62,6 +62,8 @@ struct RecordedFrame {
   // XrFrameEndInfo keeps the game's type, next, displayTime and
   // environmentBlendMode.
   bool mGameLayersForwardedUnchanged;
+  // The forwarded `layers` pointer is the game's own pointer (pass-through).
+  bool mGameLayersPointerForwarded;
   uint32_t mLayerCount;
   std::vector<RecordedQuad> mQuads;
   // The image released this frame; BGRA/RGBA as created, tightly packed.
@@ -71,6 +73,14 @@ struct RecordedFrame {
   // Before each step the harness writes the sentinel
   // ActiveInGameViewSentinel(step index), so "not set" differs from "set to 0".
   uint64_t mActiveInGameViewID;
+};
+
+// The layer's xrCreateSwapchain/xrDestroySwapchain calls, in order.
+struct SwapchainEvent {
+  bool mCreated;// else destroyed
+  int mOrdinal;// the swapchain's creation order
+  size_t mFrameCount;// frames recorded before the call
+  bool operator==(const SwapchainEvent&) const = default;
 };
 
 constexpr uint64_t ActiveInGameViewSentinel(size_t stepIndex) {
@@ -86,8 +96,11 @@ inline constexpr char HarnessSkipMessage[] =
 // e.g. "WARP: Microsoft Basic Render Driver"; empty if unsupported.
 std::string HarnessAdapterDescription();
 
+// The fake runtime fails the run if the layer destroys a swapchain after
+// xrDestroySession, or one it never created.
 std::vector<RecordedFrame> RunHarness(
   const std::filesystem::path& layerDll,
-  const HarnessScript&);
+  const HarnessScript&,
+  std::vector<SwapchainEvent>* swapchainEvents = nullptr);
 
 }// namespace OpenKneeboard::Tests
