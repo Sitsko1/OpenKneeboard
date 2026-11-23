@@ -7,13 +7,20 @@ add_executable(
   semver_test.cpp
   RayIntersectsRect_test.cpp
   VRKneeboard_test.cpp
+  VRKneeboardParity_test.cpp
+  SpriteAtlasParity_test.cpp
   SHM_test.cpp
   SHMLayout_test.cpp
   SHMParity_test.cpp
+  OpenXRLayerLoad_test.cpp
+  OpenXRLayerHarness.cpp
+  OpenXRLayerParity_test.cpp
   PluginManifest_test.cpp
   VRSettings_test.cpp
+  OpenXRLayerRegistry_test.cpp
   # ponytail: compiled directly rather than linking OpenKneeboard-App-Common,
   # which drags in the Windows App SDK, CEF, and more.
+  ../app/app-common/AppSettings.cpp
   ../app/app-common/Plugin.cpp
   ../app/app-common/VRSettings.cpp
 )
@@ -28,7 +35,10 @@ target_compile_definitions(
   PRIVATE
   "OKB_TEST_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "OKB_RUST_DIR=\"${CMAKE_SOURCE_DIR}/rust\""
+  "OKB_TEST_CPP_LAYER_DLL=\"$<TARGET_FILE:OpenKneeboard-OpenXR>\""
+  "OKB_TEST_RUST_LAYER_DLL=\"$<GENEX_EVAL:$<TARGET_PROPERTY:OpenKneeboard-OpenXR-Rust,OUTPUT_FILE>>\""
 )
+add_dependencies(OpenKneeboard-Tests OpenKneeboard-OpenXR OpenKneeboard-OpenXR-Rust)
 target_link_libraries(
   OpenKneeboard-Tests
   PRIVATE
@@ -37,15 +47,26 @@ target_link_libraries(
   OpenKneeboard-Geometry2D
   OpenKneeboard-RayIntersectsRect
   OpenKneeboard-SHM
+  OpenKneeboard-SpriteAtlas
   OpenKneeboard-VRKneeboard
   OpenKneeboard-config
   OpenKneeboard-json
+  OpenKneeboard-OpenXRLayerRegistry
   OpenKneeboard-semver
   OpenKneeboard-version
   okb_ffi
+  ThirdParty::OpenXR
   ThirdParty::CppWinRT
   ThirdParty::JSON
+  System::D3d11
+  System::Dxgi
 )
 # DISCOVERY_MODE PRE_TEST: discovery runs at ctest time, so a build never
 # fails because the freshly linked test binary can't start.
-gtest_discover_tests(OpenKneeboard-Tests DISCOVERY_MODE PRE_TEST)
+# RESOURCE_LOCK: tests sharing the process-global ActiveConsumers SHM must not run in
+# parallel under ctest -j.
+gtest_discover_tests(
+  OpenKneeboard-Tests
+  DISCOVERY_MODE PRE_TEST
+  PROPERTIES RESOURCE_LOCK ActiveConsumers
+)

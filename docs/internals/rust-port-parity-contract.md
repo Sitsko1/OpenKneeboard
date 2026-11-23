@@ -51,8 +51,15 @@ Parity is judged on two observable outputs. Internal structure, threading, and c
 Both harnesses are built in Phase 1.
 
 - **SHM differential harness:** feeds an identical script of writer actions to the C++ and the Rust writers (in-process, through `okb-ffi`) and reads back with both readers in all four writer/reader combinations. It compares every `MaybeGet()` result field by field, compares the bytes of the frame SHM after each step, and, for each consumer kind, which `ActiveConsumers` timestamp field a passing read sets (the timestamps themselves differ from run to run). The scripts start with the scenarios in `src/tests/SHM_test.cpp` and add multi-layer frames, swapchain wrap-around, and detach and reattach. The byte comparison masks `mSessionID`, which is random per writer and per detach, and the trailing padding of each frame slot (see "Acceptable differences"); every other byte must match. Implemented as `SHMParity.*` in `src/tests/SHMParity_test.cpp`.
-- **Layer recorded-frame comparison:** runs `hello_xr` with `test-feeder` publishing a fixed set of layers (including more layers than the runtime allows, and a global-input layer that is not last in SHM order), once with the C++ layer and once with the Rust layer (selected by the C++/Rust layer switch). An OpenXR capture layer, or a debug trace from each layer, records the appended quads per `xrEndFrame`. Phase 1 passes when every recorded frame matches under the rules above.
+- **Layer recorded-frame comparison:** implemented as `RustLayerParity.*` in `src/tests/OpenXRLayerParity_test.cpp`. A fake OpenXR runtime and a D3D11 feeder publish a fixed set of layers (including more layers than the runtime allows, and a global-input layer that is not last in SHM order), once through the C++ layer and once through the Rust layer. The harness records the appended quads per `xrEndFrame`; Phase 1 passes when every recorded frame matches under the rules above. It also compares the swapchain pixels within ±1 per 8-bit channel. It runs on WARP in CI. The C++/Rust layer switch (the `OpenXRLayer` app setting) is only needed for the manual hardware check in `rust-openxr-layer.md`.
 - **Unit tests:** the C++ characterization tests in `src/tests/` (`VRKneeboard_test.cpp`, `RayIntersectsRect_test.cpp`, `SHM_test.cpp`) are mirrored in Rust with the same inputs and expected values.
+
+## Phase 1b scope
+
+The Rust layer supports D3D11 only. D3D12 and Vulkan sessions pass through with no kneeboard. This is temporary, until Phases 1c and 1d. Two observable differences follow from it:
+
+- After a D3D12 or Vulkan session, a second `xrCreateSession` is accepted, where the C++ layer returns `XR_ERROR_LIMIT_REACHED`.
+- `xrCreateVulkanInstanceKHR` and `xrCreateVulkanDeviceKHR` are forwarded to the next layer, not hooked.
 
 ## Known quirks (preserve in Phase 1)
 
@@ -65,6 +72,8 @@ Characterization tests found these behaviors. They may look wrong, but Phase 1 k
 - `VRKneeboard.FirstFrameDoesNotRecenter`: no recenter happens until `mRecenterCount` changes from 0. Before the first recenter, kneeboards are placed relative to the tracking-space origin, with eye height taken from the first headset pose ever seen.
 - `SHM::Writer` (observed in code): constructing a writer unconditionally resets the whole shared header, even if another writer is live.
 - `ActiveConsumers::Set(OpenXR_D3D12)` sets `mOpenXR_D3D11`, not `mOpenXR_D3D12`, so D3D12 consumers are reported as D3D11 and `mOpenXR_D3D12` is never set. Pinned by Rust test `d3d12_consumer_sets_d3d11_timestamp_quirk` and by `SHMParity.ActiveConsumers`.
+- OpenXR layer sprite atlas: atlas sizes are computed from all frame layers but indexed by VR-layer index. The atlas cache key is the texture size only; it ignores the layer count and layer sizes. A frame that adds a layer without changing the texture size therefore indexes past its cached atlas and terminates the game (both layers). Not exercised by the harness: the `AtlasResize` script avoids it by changing the texture size whenever it adds a layer.
+- OpenXR layer HMD pose cache: it is process-static and keyed on `displayTime`. A `displayTime` of 0 returns the default pose without locating.
 
 ## Changes deferred to Phase 2
 

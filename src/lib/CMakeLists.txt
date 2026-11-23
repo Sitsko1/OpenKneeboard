@@ -469,6 +469,16 @@ target_link_libraries(
   ThirdParty::SemVer
 )
 
+ok_add_library(
+  OpenKneeboard-OpenXRLayerRegistry
+  STATIC
+  OpenXRLayerRegistry.cpp
+  HEADERS
+  include/OpenKneeboard/OpenXRLayerRegistry.hpp
+  INCLUDE_DIRECTORIES
+  include
+)
+
 ok_add_library(OpenKneeboard-shims INTERFACE)
 target_include_directories(
   OpenKneeboard-shims

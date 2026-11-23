@@ -1,0 +1,3 @@
+EXPORTS
+; needed so the i686 stdcall export is undecorated, as in the C++ layer
+OpenKneeboard_xrNegotiateLoaderApiLayerInterface

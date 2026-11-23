@@ -20,6 +20,14 @@ const std::string_view OPENXR_32BIT_JSON("OpenKneeboard-OpenXR32.json");
 const std::string_view OPENXR_32BIT_DLL(
   "$<PATH:GET_FILENAME,$<TARGET_PROPERTY:OpenKneeboard-OpenXR32,IMPORTED_LOCATION>>");
 
+const std::string_view OPENXR_64BIT_RUST_JSON("OpenKneeboard-OpenXR-Rust.json");
+const std::string_view OPENXR_64BIT_RUST_DLL(
+  "$<PATH:GET_FILENAME,$<GENEX_EVAL:$<TARGET_PROPERTY:OpenKneeboard-OpenXR-Rust,OUTPUT_FILE>>>");
+
+const std::string_view OPENXR_32BIT_RUST_JSON("OpenKneeboard-OpenXR-Rust32.json");
+const std::string_view OPENXR_32BIT_RUST_DLL(
+  "$<PATH:GET_FILENAME,$<GENEX_EVAL:$<TARGET_PROPERTY:OpenKneeboard-OpenXR-Rust32,OUTPUT_FILE>>>");
+
 
 const std::string_view OPENXR_REGISTER_LAYER_HELPER(
   "$<TARGET_FILE_NAME:OpenKneeboard-OpenXR-Helper>");

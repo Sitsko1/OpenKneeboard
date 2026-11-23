@@ -1,4 +1,4 @@
-//! C ABI over `okb-shm`, for the C++ test harness.
+//! C ABI over `okb-shm` and `okb-vr`, for the C++ test harness.
 //!
 //! Handles are opaque and `!Send`: use each one only on the thread that created it. Every
 //! entry point aborts the process if the Rust side panics (C++ `fatal()` parity); no unwind
@@ -9,8 +9,9 @@
 use std::ffi::{CStr, c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use okb_shm::wire::{Config, LayerConfig};
+use okb_shm::wire::{Config, LayerConfig, PixelRect, PixelSize};
 use okb_shm::{ConsumerKind, FrameError, Names, ReadError, Reader, Version};
+use okb_vr::{ActiveViewUpdate, Pose, Quat, SpriteAtlas, Vec2, Vec3, VrKneeboard};
 
 /// Capacity of `OkbFrame::layers`. A literal, as cbindgen does not export constants from
 /// dependencies.
@@ -395,4 +396,161 @@ pub unsafe extern "C" fn okb_shm_reader_maybe_get(reader: *mut ShmReader, out: *
             Err(ReadError::DuplicateHandle(e)) => -e.raw_os_error().unwrap_or(0).clamp(1, i32::MAX),
         }
     })
+}
+
+/// One `okb_vr::VrLayer`: `layer_index` is the layer's index in the input array.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VrLayerOut {
+    pub layer_index: u32,
+    pub kneeboard_pose: Pose,
+    pub kneeboard_size: Vec2,
+    pub kneeboard_opacity: f32,
+    pub is_looking_at_kneeboard: bool,
+}
+
+/// C++ `VRKneeboard`. Free with `okb_vr_kneeboard_free`.
+#[unsafe(no_mangle)]
+pub extern "C" fn okb_vr_kneeboard_new() -> *mut VrKneeboard {
+    ffi(|| Box::into_raw(Box::new(VrKneeboard::new())))
+}
+
+/// # Safety
+/// `kb` is null or from `okb_vr_kneeboard_new`, and not used afterward.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn okb_vr_kneeboard_free(kb: *mut VrKneeboard) {
+    ffi(|| {
+        if !kb.is_null() {
+            // SAFETY: from `Box::into_raw` in `okb_vr_kneeboard_new`, freed once.
+            drop(unsafe { Box::from_raw(kb) });
+        }
+    })
+}
+
+/// C++ `VRKneeboard::GetLayers`. Writes `*out_count` layers to `out`, and to `*active_view`
+/// the ID C++ would pass to `SHM::ActiveConsumers::SetActiveInGameViewID` (0 for `{}`), or
+/// `UINT64_MAX` if it would not call it. Aborts if `count` exceeds 16.
+///
+/// # Safety
+/// `kb` is a live `OkbVrKneeboard` on its creating thread; `config` is a valid `OkbConfig`;
+/// `layers` points to `count` `OkbLayerConfig`s (may be null if `count` is 0); `out` is valid
+/// for 16 writes; `out_count` and `active_view` are valid for writes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn okb_vr_kneeboard_get_layers(
+    kb: *mut VrKneeboard,
+    config: *const Config,
+    layers: *const LayerConfig,
+    count: usize,
+    hmd: Pose,
+    out: *mut VrLayerOut,
+    out_count: *mut u32,
+    active_view: *mut u64,
+) {
+    ffi(|| {
+        // SAFETY: valid per the contract.
+        let config = unsafe { config.as_ref() }.expect("null config");
+        assert!(
+            count <= MAX_VIEW_COUNT,
+            "Asked for {count} layers, but max is {MAX_VIEW_COUNT}"
+        );
+        assert!(
+            !out.is_null() && !out_count.is_null() && !active_view.is_null(),
+            "null out"
+        );
+        let layers = if count == 0 {
+            &[][..]
+        } else {
+            assert!(!layers.is_null(), "null layers");
+            // SAFETY: `layers` points to `count` initialized `LayerConfig`s per the contract;
+            // every bit pattern is valid for them (`CBool` for C++ `bool`).
+            unsafe { std::slice::from_raw_parts(layers, count) }
+        };
+        // SAFETY: forwarded contract.
+        let (vr_layers, update) = unsafe { handle(kb) }.get_layers(config, layers, hmd);
+        let base = layers.as_ptr().addr();
+        for (i, layer) in vr_layers.iter().enumerate() {
+            let index = (std::ptr::from_ref(layer.config).addr() - base) / size_of::<LayerConfig>();
+            let p = layer.params;
+            let value = VrLayerOut {
+                layer_index: index as u32,
+                kneeboard_pose: p.kneeboard_pose,
+                kneeboard_size: p.kneeboard_size,
+                kneeboard_opacity: p.kneeboard_opacity,
+                is_looking_at_kneeboard: p.is_looking_at_kneeboard,
+            };
+            // SAFETY: `i < vr_layers.len() <= count <= 16`, and `out` is valid for 16 writes.
+            unsafe { out.add(i).write(value) };
+        }
+        // SAFETY: valid for writes per the contract; checked non-null above.
+        unsafe {
+            out_count.write(vr_layers.len() as u32);
+            active_view.write(match update {
+                ActiveViewUpdate::NoCall => u64::MAX,
+                ActiveViewUpdate::Set(id) => id,
+            });
+        }
+    })
+}
+
+/// C++ `RayIntersectsRect`.
+#[unsafe(no_mangle)]
+pub extern "C" fn okb_ray_intersects_rect(
+    ray_origin: Vec3,
+    ray_orientation: Quat,
+    rect_center: Vec3,
+    rect_orientation: Quat,
+    rect_size: Vec2,
+) -> bool {
+    ffi(|| {
+        okb_vr::ray_intersects_rect(
+            ray_origin,
+            ray_orientation,
+            rect_center,
+            rect_orientation,
+            rect_size,
+        )
+    })
+}
+
+/// C++ `SpriteAtlas`. Writes the atlas size to `*out_size` and one rect per sprite to
+/// `out_rects`; returns 0, or -1 if C++ would throw (the sprites do not fit).
+///
+/// # Safety
+/// `sprites` points to `count` `OkbPixelSize`s (`count` is 1 to 16); `out_size` is valid for a
+/// write; `out_rects` is valid for `count` writes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn okb_sprite_atlas_new(
+    sprites: *const PixelSize,
+    count: usize,
+    out_size: *mut PixelSize,
+    out_rects: *mut PixelRect,
+) -> i32 {
+    ffi(|| {
+        assert!(
+            (1..=MAX_VIEW_COUNT).contains(&count) && !sprites.is_null(),
+            "bad sprite count {count}"
+        );
+        assert!(!out_size.is_null() && !out_rects.is_null(), "null out");
+        // SAFETY: `sprites` points to `count` initialized values per the contract.
+        let sprites = unsafe { std::slice::from_raw_parts(sprites, count) };
+        match SpriteAtlas::new(sprites) {
+            Ok(atlas) => {
+                // SAFETY: valid for writes per the contract; `i < count`.
+                unsafe {
+                    out_size.write(atlas.size());
+                    for i in 0..count {
+                        out_rects.add(i).write(atlas.rect(i));
+                    }
+                }
+                0
+            }
+            Err(okb_vr::AtlasError::DoesNotFit) => -1,
+        }
+    })
+}
+
+/// C++ `PixelSize::ScaledToFit(container)` (ShrinkOrGrow).
+#[unsafe(no_mangle)]
+pub extern "C" fn okb_scaled_to_fit(size: PixelSize, container: PixelSize) -> PixelSize {
+    ffi(|| okb_vr::scaled_to_fit(size, container))
 }

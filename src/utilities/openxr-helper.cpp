@@ -11,6 +11,7 @@
  * If done from the main process, the registry write will be app-specific.
  */
 
+#include <OpenKneeboard/OpenXRLayerRegistry.hpp>
 #include <OpenKneeboard/RuntimeFiles.hpp>
 
 #include <OpenKneeboard/dprint.hpp>
@@ -19,9 +20,11 @@
 #include <Windows.h>
 #include <shellapi.h>
 
+#include <array>
 #include <filesystem>
-#include <functional>
+#include <span>
 #include <string>
+#include <vector>
 
 using namespace OpenKneeboard;
 
@@ -29,6 +32,22 @@ enum class RegistryView {
   WOW64_64,
   WOW64_32,
 };
+
+static std::wstring W(std::string_view v) {
+  return std::filesystem::path(v).wstring();
+}
+
+static std::span<const std::wstring_view> AllOpenKneeboardJsonNames() {
+  static const std::wstring names[] = {
+    W(RuntimeFiles::OPENXR_64BIT_JSON),
+    W(RuntimeFiles::OPENXR_32BIT_JSON),
+    W(RuntimeFiles::OPENXR_64BIT_RUST_JSON),
+    W(RuntimeFiles::OPENXR_32BIT_RUST_JSON),
+  };
+  static const std::wstring_view views[] = {
+    names[0], names[1], names[2], names[3]};
+  return views;
+}
 
 static HKEY OpenOrCreateImplicitLayerRegistryKey(RegistryView view, HKEY root) {
   HKEY openXRKey {0};
@@ -49,20 +68,12 @@ static HKEY OpenOrCreateImplicitLayerRegistryKey(RegistryView view, HKEY root) {
   return openXRKey;
 }
 
-static void DisableOpenXRLayers(
-  RegistryView view,
-  HKEY root,
-  std::function<bool(std::wstring_view)> predicate) {
-  auto openXRKey = OpenOrCreateImplicitLayerRegistryKey(view, root);
-  if (!openXRKey) {
-    return;
-  }
-
+static std::vector<std::wstring> EnumerateLayers(HKEY openXRKey) {
+  std::vector<std::wstring> ret;
   // https://docs.microsoft.com/en-us/windows/win32/sysinfo/registry-element-size-limits
   std::wstring valueNameBuffer(16383, L'x');
   DWORD valueSize = valueNameBuffer.size();
   DWORD valueIndex {0};
-  DWORD disabled = 1;
   while (RegEnumValueW(
            openXRKey,
            valueIndex++,
@@ -73,32 +84,40 @@ static void DisableOpenXRLayers(
            nullptr,
            nullptr)
          == ERROR_SUCCESS) {
-    std::wstring valueName = valueNameBuffer.substr(0, valueSize);
+    ret.push_back(valueNameBuffer.substr(0, valueSize));
     valueSize = valueNameBuffer.size();
-
-    if (predicate(valueName)) {
-      RegSetValueExW(
-        openXRKey,
-        valueName.c_str(),
-        0,
-        REG_DWORD,
-        reinterpret_cast<const BYTE*>(&disabled),
-        sizeof(disabled));
-    }
   }
-
-  RegCloseKey(openXRKey);
+  return ret;
 }
 
+static void SetLayersDisabled(
+  HKEY openXRKey,
+  const std::vector<std::wstring>& layers) {
+  DWORD disabled = 1;
+  for (const auto& layer: layers) {
+    RegSetValueExW(
+      openXRKey,
+      layer.c_str(),
+      0,
+      REG_DWORD,
+      reinterpret_cast<const BYTE*>(&disabled),
+      sizeof(disabled));
+  }
+}
+
+/// Both implementations' JSON file names for one bitness
 static void DisableOpenXRLayer(
   RegistryView view,
   HKEY root,
-  const std::filesystem::path& rawJsonPath) {
-  const auto jsonPath = std::filesystem::canonical(rawJsonPath).wstring();
-
-  DisableOpenXRLayers(view, root, [jsonPath](std::wstring_view layerPath) {
-    return layerPath == jsonPath;
-  });
+  std::span<const std::wstring_view> bitnessJsonFileNames) {
+  auto openXRKey = OpenOrCreateImplicitLayerRegistryKey(view, root);
+  if (!openXRKey) {
+    return;
+  }
+  SetLayersDisabled(
+    openXRKey,
+    LayersToDisable(EnumerateLayers(openXRKey), bitnessJsonFileNames));
+  RegCloseKey(openXRKey);
 }
 
 static void EnableOpenXRLayer(
@@ -112,11 +131,10 @@ static void EnableOpenXRLayer(
   }
 
   const auto jsonPath = std::filesystem::canonical(rawJsonPath).wstring();
-  const auto jsonFile = rawJsonPath.filename().wstring();
-  DisableOpenXRLayers(
-    view, root, [jsonFile, jsonPath](std::wstring_view layerPath) {
-      return layerPath != jsonPath && layerPath.ends_with(jsonFile);
-    });
+  SetLayersDisabled(
+    openXRKey,
+    LayersToDisableOnEnable(
+      EnumerateLayers(openXRKey), jsonPath, AllOpenKneeboardJsonNames()));
 
   DWORD disabled = 0;
   const auto success = RegSetValueExW(
@@ -166,24 +184,40 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
   const auto command = std::wstring_view(argv[0]);
   const std::filesystem::path directory {std::wstring_view(argv[1])};
 
-  const auto layer64 = directory / RuntimeFiles::OPENXR_64BIT_JSON;
+  const auto names = AllOpenKneeboardJsonNames();
+  // [cpp64, cpp32, rust64, rust32] -> bitness pairs
+  const std::array<std::wstring_view, 2> names64 {names[0], names[2]};
+  const std::array<std::wstring_view, 2> names32 {names[1], names[3]};
+
   if (command == L"disable-HKLM-64") {
-    DisableOpenXRLayer(RegistryView::WOW64_64, HKEY_LOCAL_MACHINE, layer64);
+    DisableOpenXRLayer(RegistryView::WOW64_64, HKEY_LOCAL_MACHINE, names64);
     return 0;
   }
-  if (command == L"enable-HKLM-64") {
-    EnableOpenXRLayer(RegistryView::WOW64_64, HKEY_LOCAL_MACHINE, layer64);
+  if (command == L"disable-HKLM-32") {
+    DisableOpenXRLayer(RegistryView::WOW64_32, HKEY_LOCAL_MACHINE, names32);
     return 0;
   }
 
-  const auto layer32 = directory / RuntimeFiles::OPENXR_32BIT_JSON;
-  if (command == L"disable-HKLM-32") {
-    DisableOpenXRLayer(RegistryView::WOW64_32, HKEY_LOCAL_MACHINE, layer32);
-    return 0;
-  }
-  if (command == L"enable-HKLM-32") {
-    EnableOpenXRLayer(RegistryView::WOW64_32, HKEY_LOCAL_MACHINE, layer32);
-    return 0;
+  struct Enable {
+    std::wstring_view mCommand;
+    RegistryView mView;
+    std::string_view mFile;
+  };
+  const Enable enables[] = {
+    {L"enable-HKLM-64", RegistryView::WOW64_64, RuntimeFiles::OPENXR_64BIT_JSON},
+    {L"enable-HKLM-64-rust",
+     RegistryView::WOW64_64,
+     RuntimeFiles::OPENXR_64BIT_RUST_JSON},
+    {L"enable-HKLM-32", RegistryView::WOW64_32, RuntimeFiles::OPENXR_32BIT_JSON},
+    {L"enable-HKLM-32-rust",
+     RegistryView::WOW64_32,
+     RuntimeFiles::OPENXR_32BIT_RUST_JSON},
+  };
+  for (const auto& e: enables) {
+    if (command == e.mCommand) {
+      EnableOpenXRLayer(e.mView, HKEY_LOCAL_MACHINE, directory / e.mFile);
+      return 0;
+    }
   }
 
   dprint(L"Invalid command: {}", command);

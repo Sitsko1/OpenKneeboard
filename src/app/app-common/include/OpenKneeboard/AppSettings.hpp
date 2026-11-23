@@ -40,11 +40,17 @@ struct AutoUpdateSettings final {
   constexpr bool operator==(const AutoUpdateSettings&) const noexcept = default;
 };
 
+enum class OpenXRLayerImplementation {
+  Cpp,
+  Rust,
+};
+
 struct AppSettings final {
   std::optional<RECT> mWindowRect;
   AutoUpdateSettings mAutoUpdate {};
   std::string mLastRunVersion;
   bool mAlwaysShowDeveloperTools {false};
+  OpenXRLayerImplementation mOpenXRLayer {OpenXRLayerImplementation::Cpp};
 
   struct Deprecated {
     struct DualKneeboardSettings final {
