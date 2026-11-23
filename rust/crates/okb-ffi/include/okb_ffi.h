@@ -451,6 +451,24 @@ bool okb_ray_intersects_rect(struct OkbVec3 ray_origin,
                              struct OkbQuat rect_orientation,
                              struct OkbVec2 rect_size);
 
+/**
+ * C++ `SpriteAtlas`. Writes the atlas size to `*out_size` and one rect per sprite to
+ * `out_rects`; returns 0, or -1 if C++ would throw (the sprites do not fit).
+ *
+ * # Safety
+ * `sprites` points to `count` `OkbPixelSize`s (`count` is 1 to 16); `out_size` is valid for a
+ * write; `out_rects` is valid for `count` writes.
+ */
+int32_t okb_sprite_atlas_new(const struct OkbPixelSize *sprites,
+                             size_t count,
+                             struct OkbPixelSize *out_size,
+                             struct OkbPixelRect *out_rects);
+
+/**
+ * C++ `PixelSize::ScaledToFit(container)` (ShrinkOrGrow).
+ */
+struct OkbPixelSize okb_scaled_to_fit(struct OkbPixelSize size, struct OkbPixelSize container);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

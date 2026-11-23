@@ -9,9 +9,9 @@
 use std::ffi::{CStr, c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use okb_shm::wire::{Config, LayerConfig};
+use okb_shm::wire::{Config, LayerConfig, PixelRect, PixelSize};
 use okb_shm::{ConsumerKind, FrameError, Names, ReadError, Reader, Version};
-use okb_vr::{ActiveViewUpdate, Pose, Quat, Vec2, Vec3, VrKneeboard};
+use okb_vr::{ActiveViewUpdate, Pose, Quat, SpriteAtlas, Vec2, Vec3, VrKneeboard};
 
 /// Capacity of `OkbFrame::layers`. A literal, as cbindgen does not export constants from
 /// dependencies.
@@ -510,4 +510,47 @@ pub extern "C" fn okb_ray_intersects_rect(
             rect_size,
         )
     })
+}
+
+/// C++ `SpriteAtlas`. Writes the atlas size to `*out_size` and one rect per sprite to
+/// `out_rects`; returns 0, or -1 if C++ would throw (the sprites do not fit).
+///
+/// # Safety
+/// `sprites` points to `count` `OkbPixelSize`s (`count` is 1 to 16); `out_size` is valid for a
+/// write; `out_rects` is valid for `count` writes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn okb_sprite_atlas_new(
+    sprites: *const PixelSize,
+    count: usize,
+    out_size: *mut PixelSize,
+    out_rects: *mut PixelRect,
+) -> i32 {
+    ffi(|| {
+        assert!(
+            (1..=MAX_VIEW_COUNT).contains(&count) && !sprites.is_null(),
+            "bad sprite count {count}"
+        );
+        assert!(!out_size.is_null() && !out_rects.is_null(), "null out");
+        // SAFETY: `sprites` points to `count` initialized values per the contract.
+        let sprites = unsafe { std::slice::from_raw_parts(sprites, count) };
+        match SpriteAtlas::new(sprites) {
+            Ok(atlas) => {
+                // SAFETY: valid for writes per the contract; `i < count`.
+                unsafe {
+                    out_size.write(atlas.size());
+                    for i in 0..count {
+                        out_rects.add(i).write(atlas.rect(i));
+                    }
+                }
+                0
+            }
+            Err(okb_vr::AtlasError::DoesNotFit) => -1,
+        }
+    })
+}
+
+/// C++ `PixelSize::ScaledToFit(container)` (ShrinkOrGrow).
+#[unsafe(no_mangle)]
+pub extern "C" fn okb_scaled_to_fit(size: PixelSize, container: PixelSize) -> PixelSize {
+    ffi(|| okb_vr::scaled_to_fit(size, container))
 }

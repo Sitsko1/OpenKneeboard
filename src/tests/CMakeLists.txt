@@ -8,6 +8,7 @@ add_executable(
   RayIntersectsRect_test.cpp
   VRKneeboard_test.cpp
   VRKneeboardParity_test.cpp
+  SpriteAtlasParity_test.cpp
   SHM_test.cpp
   SHMLayout_test.cpp
   SHMParity_test.cpp
@@ -38,6 +39,7 @@ target_link_libraries(
   OpenKneeboard-Geometry2D
   OpenKneeboard-RayIntersectsRect
   OpenKneeboard-SHM
+  OpenKneeboard-SpriteAtlas
   OpenKneeboard-VRKneeboard
   OpenKneeboard-config
   OpenKneeboard-json
@@ -49,4 +51,10 @@ target_link_libraries(
 )
 # DISCOVERY_MODE PRE_TEST: discovery runs at ctest time, so a build never
 # fails because the freshly linked test binary can't start.
-gtest_discover_tests(OpenKneeboard-Tests DISCOVERY_MODE PRE_TEST)
+# RESOURCE_LOCK: tests sharing the process-global ActiveConsumers SHM must not run in
+# parallel under ctest -j.
+gtest_discover_tests(
+  OpenKneeboard-Tests
+  DISCOVERY_MODE PRE_TEST
+  PROPERTIES RESOURCE_LOCK ActiveConsumers
+)
