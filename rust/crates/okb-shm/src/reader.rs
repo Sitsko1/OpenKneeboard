@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn abandoned_mutex_resets_header() {
         use crate::win32::{LockOutcome, NamedMutex};
-        let names = names("abandoned");
+        let names = names("reader-abandoned");
         let mut w = Writer::new(&names, 1).unwrap();
         {
             let mut g = w.lock();
@@ -309,7 +309,7 @@ mod tests {
             let mut r = reader(&reader_names, 1);
             tx.send(frame_err(r.maybe_get())).unwrap();
         });
-        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
         drop(guard);
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(5)).unwrap(),
