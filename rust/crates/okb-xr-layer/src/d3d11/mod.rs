@@ -6,7 +6,7 @@ mod shm_client;
 mod sprite_batch;
 mod state;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub use renderer::{Renderer, SwapchainImage};
 pub use shm_client::{MappedFrame, ShmClient};

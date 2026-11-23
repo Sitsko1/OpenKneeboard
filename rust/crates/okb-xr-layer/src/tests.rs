@@ -136,7 +136,7 @@ fn d3d12_session_passes_through() {
     };
     let (ret, session) = create_session(ptr::from_ref(&binding).cast());
     assert_eq!(ret, xr::Result::SUCCESS);
-    assert_eq!(kneeboard_device(), None);
+    assert!(!has_kneeboard());
     assert_eq!(
         STATE.lock().unwrap().as_ref().unwrap().runtime_name,
         FAKE_RUNTIME_NAME
@@ -195,14 +195,17 @@ fn hooked_functions_resolve_to_the_layer() {
 fn second_session_returns_limit_reached() {
     let _g = setup();
     let _chain = create_instance().2;
+    let (device, _ctx) = crate::d3d11::tests::warp();
     let binding = xr::GraphicsBindingD3D11KHR {
         ty: xr::StructureType::GRAPHICS_BINDING_D3D11_KHR,
         next: ptr::null(),
-        device: ptr::without_provenance_mut(0x1000),
+        device: windows::core::Interface::as_raw(&device),
     };
     let (ret, session) = create_session(ptr::from_ref(&binding).cast());
     assert_eq!(ret, xr::Result::SUCCESS);
-    assert_eq!(kneeboard_device(), Some(0x1000));
+    assert!(has_kneeboard());
+    // The LOCAL and VIEW reference spaces.
+    assert_eq!(CALLS.with_borrow(|c| c.create_space), 2);
 
     // C++ forwards first, then refuses.
     let (ret, _) = create_session(ptr::from_ref(&binding).cast());
@@ -211,8 +214,10 @@ fn second_session_returns_limit_reached() {
 
     // SAFETY: plain handle.
     assert_eq!(unsafe { xr_destroy_session(session) }, xr::Result::SUCCESS);
-    assert_eq!(kneeboard_device(), None);
+    assert!(!has_kneeboard());
     assert_eq!(CALLS.with_borrow(|c| c.destroy_session), 1);
+    // Dropping the kneeboard destroyed both spaces (no swapchain was created).
+    assert_eq!(CALLS.with_borrow(|c| c.destroy_space), 2);
 }
 
 #[test]

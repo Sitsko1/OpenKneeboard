@@ -21,6 +21,8 @@ pub(crate) struct Calls {
     pub(crate) create_session: u32,
     pub(crate) destroy_session: u32,
     pub(crate) destroy_instance: u32,
+    pub(crate) create_space: u32,
+    pub(crate) destroy_space: u32,
     /// `(frameEndInfo, layers, layerCount)` for each forwarded `xrEndFrame`.
     pub(crate) end_frame: Vec<(
         *const xr::FrameEndInfo,
@@ -87,6 +89,35 @@ unsafe extern "system" fn fake_end_frame(
     xr::Result::SUCCESS
 }
 
+unsafe extern "system" fn fake_get_system_properties(
+    _: xr::Instance,
+    _: xr::SystemId,
+    props: *mut xr::SystemProperties,
+) -> xr::Result {
+    // SAFETY: the layer passes a valid `SystemProperties`.
+    unsafe { (*props).graphics_properties.max_layer_count = 16 };
+    xr::Result::SUCCESS
+}
+
+unsafe extern "system" fn fake_create_reference_space(
+    _: xr::Session,
+    _: *const xr::ReferenceSpaceCreateInfo,
+    space: *mut xr::Space,
+) -> xr::Result {
+    let n = CALLS.with_borrow_mut(|c| {
+        c.create_space += 1;
+        c.create_space
+    });
+    // SAFETY: the layer passes a valid out-pointer.
+    unsafe { *space = xr::Space::from_raw(u64::from(n)) };
+    xr::Result::SUCCESS
+}
+
+unsafe extern "system" fn fake_destroy_space(_: xr::Space) -> xr::Result {
+    CALLS.with_borrow_mut(|c| c.destroy_space += 1);
+    xr::Result::SUCCESS
+}
+
 unsafe extern "system" fn fake_get_instance_properties(
     _: xr::Instance,
     props: *mut xr::InstanceProperties,
@@ -114,6 +145,11 @@ pub(crate) unsafe extern "system" fn fake_get_instance_proc_addr(
         "xrGetInstanceProperties" => {
             void_fn!(fake_get_instance_properties, pfn::GetInstanceProperties)
         }
+        "xrGetSystemProperties" => void_fn!(fake_get_system_properties, pfn::GetSystemProperties),
+        "xrCreateReferenceSpace" => {
+            void_fn!(fake_create_reference_space, pfn::CreateReferenceSpace)
+        }
+        "xrDestroySpace" => void_fn!(fake_destroy_space, pfn::DestroySpace),
         "xrCreateVulkanDeviceKHR" => void_fn!(fake_vulkan_device, pfn::CreateVulkanDeviceKHR),
         _ => None,
     };
@@ -173,13 +209,6 @@ pub(crate) fn create_instance() -> (xr::Result, xr::Instance, Box<[xr::ApiLayerN
     (ret, instance, chain)
 }
 
-pub(crate) fn kneeboard_device() -> Option<usize> {
-    STATE
-        .lock()
-        .unwrap()
-        .as_ref()
-        .unwrap()
-        .kneeboard
-        .as_ref()
-        .map(|k| k.device)
+pub(crate) fn has_kneeboard() -> bool {
+    STATE.lock().unwrap().as_ref().unwrap().kneeboard.is_some()
 }

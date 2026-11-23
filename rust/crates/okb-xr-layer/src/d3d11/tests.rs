@@ -16,7 +16,7 @@ use crate::compose::LayerSprite;
 
 type Rgba = [u8; 4];
 
-fn warp() -> (ID3D11Device, ID3D11DeviceContext) {
+pub(crate) fn warp() -> (ID3D11Device, ID3D11DeviceContext) {
     let (mut device, mut ctx) = (None, None);
     // SAFETY: out-pointers are valid locals.
     unsafe {

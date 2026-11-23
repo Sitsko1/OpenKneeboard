@@ -10,7 +10,6 @@ macro_rules! next_fns {
         /// functions. Like C++, a missing function is `None` and only fails
         /// when called.
         #[derive(Clone, Copy)]
-        #[allow(dead_code, reason = "the swapchain functions are used by the D3D11 kneeboard")]
         pub(crate) struct Next {
             pub(crate) get_instance_proc_addr: pfn::GetInstanceProcAddr,
             $(pub(crate) $field: Option<pfn::$ty>,)*

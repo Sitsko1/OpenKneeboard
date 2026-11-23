@@ -18,6 +18,7 @@ macro_rules! void_fn {
 pub mod compose;
 pub mod d3d11;
 pub mod identity;
+mod kneeboard;
 mod next;
 #[cfg(test)]
 mod test_support;
@@ -44,18 +45,26 @@ const XR_CURRENT_LOADER_API_LAYER_VERSION: u32 = 1;
 const _: () = assert!(LAYER_NAME.len() <= xr::MAX_API_LAYER_NAME_SIZE);
 const _: () = assert!(LAYER_DESCRIPTION.len() <= xr::MAX_API_LAYER_DESCRIPTION_SIZE);
 
-/// Placeholder until the D3D11 kneeboard exists: records the binding of the
-/// session that gets the kneeboard. `xrEndFrame` always forwards.
-#[allow(dead_code, reason = "read by the D3D11 kneeboard, which replaces this")]
-pub(crate) struct Kneeboard {
-    /// `XrGraphicsBindingD3D11KHR::device`, as an address.
-    pub(crate) device: usize,
-}
+/// The session's kneeboard, held in [`STATE`].
+///
+/// Hooks never hold the [`STATE`] lock while calling into the next layer or
+/// runtime (which may call back into this layer's `xrGetInstanceProcAddr`):
+/// `xrEndFrame` takes the kneeboard out, runs it unlocked, and puts it back;
+/// `xrCreateSession` builds it unlocked; the destroy hooks take it out and
+/// drop it unlocked.
+pub(crate) struct SessionKneeboard(pub(crate) kneeboard::Kneeboard);
+
+// SAFETY: `ShmClient` (`Rc`, boxed callback) and the D3D11 interfaces are not
+// `Send`. As in C++, every layer call for a session (create, end frame,
+// destroy) comes from the game's frame thread, serialized by the `STATE` mutex,
+// so the kneeboard is only ever touched from that one thread.
+#[allow(unsafe_code)]
+unsafe impl Send for SessionKneeboard {}
 
 pub(crate) struct LayerState {
     pub(crate) next: Next,
     pub(crate) runtime_name: String,
-    pub(crate) kneeboard: Option<Kneeboard>,
+    pub(crate) kneeboard: Option<SessionKneeboard>,
 }
 
 pub(crate) static STATE: Mutex<Option<LayerState>> = Mutex::new(None);
@@ -136,7 +145,7 @@ pub(crate) unsafe extern "system" fn xr_create_session(
             .unwrap()
             .as_mut()
             .expect("no instance")
-            .runtime_name = runtime_name;
+            .runtime_name = runtime_name.clone();
 
         // SAFETY: the caller's arguments, passed through.
         let ret = unsafe {
@@ -148,27 +157,43 @@ pub(crate) unsafe extern "system" fn xr_create_session(
         }
         log("Next xrCreateSession succeeded");
 
-        let mut state = STATE.lock().unwrap();
-        let state = state.as_mut().expect("no instance");
-        if state.kneeboard.is_some() {
+        let has_kneeboard = STATE
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("no instance")
+            .kneeboard
+            .is_some();
+        if has_kneeboard {
             log("Already have a kneeboard, refusing to initialize twice");
             return xr::Result::ERROR_LIMIT_REACHED;
         }
 
         // SAFETY: the caller passes a valid `XrSessionCreateInfo` whose `next`
-        // chain is made of valid `XrBaseInStructure`-prefixed structs.
+        // chain is made of valid `XrBaseInStructure`-prefixed structs, and the
+        // session the next layer just created.
         unsafe {
             let mut p = (*create_info).next.cast::<xr::BaseInStructure>();
             while !p.is_null() && (*p).ty != xr::StructureType::GRAPHICS_BINDING_D3D11_KHR {
                 p = (*p).next;
             }
             if !p.is_null() {
-                let device = (*p.cast::<xr::GraphicsBindingD3D11KHR>()).device;
-                if !device.is_null() {
-                    // ponytail: placeholder; the D3D11 kneeboard is built here later.
-                    state.kneeboard = Some(Kneeboard {
-                        device: device as usize,
-                    });
+                let binding = &*p.cast::<xr::GraphicsBindingD3D11KHR>();
+                if !binding.device.is_null() {
+                    let kneeboard = kneeboard::Kneeboard::new(
+                        &next,
+                        instance,
+                        (*create_info).system_id,
+                        *session,
+                        &runtime_name,
+                        binding,
+                    );
+                    STATE
+                        .lock()
+                        .unwrap()
+                        .as_mut()
+                        .expect("no instance")
+                        .kneeboard = Some(SessionKneeboard(kneeboard));
                     return ret;
                 }
             }
@@ -184,15 +209,22 @@ pub(crate) unsafe extern "system" fn xr_create_session(
     })
 }
 
+/// Takes the kneeboard out of [`STATE`]; dropping it (which calls the next
+/// layer) happens after the lock is released.
+fn take_kneeboard() -> (Next, Option<SessionKneeboard>) {
+    let mut state = STATE.lock().unwrap();
+    let state = state
+        .as_mut()
+        .expect("OpenXR call before xrCreateApiLayerInstance");
+    (state.next, state.kneeboard.take())
+}
+
 #[allow(unsafe_code)]
 pub(crate) unsafe extern "system" fn xr_destroy_session(session: xr::Session) -> xr::Result {
     guard(|| {
-        let next = {
-            let mut state = STATE.lock().unwrap();
-            let state = state.as_mut().expect("no instance");
-            state.kneeboard = None;
-            state.next
-        };
+        // C++ deletes the kneeboard before forwarding.
+        let (next, kneeboard) = take_kneeboard();
+        drop(kneeboard);
         // SAFETY: the caller's handle, passed through.
         unsafe { next.destroy_session.expect("xrDestroySession")(session) }
     })
@@ -201,12 +233,9 @@ pub(crate) unsafe extern "system" fn xr_destroy_session(session: xr::Session) ->
 #[allow(unsafe_code)]
 pub(crate) unsafe extern "system" fn xr_destroy_instance(instance: xr::Instance) -> xr::Result {
     guard(|| {
-        let next = {
-            let mut state = STATE.lock().unwrap();
-            let state = state.as_mut().expect("no instance");
-            state.kneeboard = None;
-            state.next
-        };
+        // C++ deletes the kneeboard before forwarding.
+        let (next, kneeboard) = take_kneeboard();
+        drop(kneeboard);
         // SAFETY: the caller's handle, passed through.
         unsafe { next.destroy_instance.expect("xrDestroyInstance")(instance) }
     })
@@ -217,8 +246,23 @@ pub(crate) unsafe extern "system" fn xr_end_frame(
     session: xr::Session,
     frame_end_info: *const xr::FrameEndInfo,
 ) -> xr::Result {
-    // SAFETY: the caller's arguments, passed through.
-    guard(|| unsafe { next().end_frame.expect("xrEndFrame")(session, frame_end_info) })
+    guard(|| {
+        let (next, kneeboard) = take_kneeboard();
+        let Some(mut kneeboard) = kneeboard else {
+            // SAFETY: the caller's arguments, passed through.
+            return unsafe { next.end_frame.expect("xrEndFrame")(session, frame_end_info) };
+        };
+        let ret = kneeboard.0.end_frame(session, frame_end_info);
+        // ponytail: assumes no destroy/create re-enters during xrEndFrame (C++'s
+        // single frame thread); a re-entrant destroy would be undone here.
+        STATE
+            .lock()
+            .unwrap()
+            .as_mut()
+            .expect("no instance")
+            .kneeboard = Some(kneeboard);
+        ret
+    })
 }
 
 #[allow(unsafe_code)]
