@@ -187,6 +187,9 @@ pub struct VrRenderSettings {
     pub quirks: Quirks,
     pub enable_gaze_input_focus: CBool,
     pub force_zoom: CBool,
+    /// C++ implicit padding, explicit here so every byte is initialized and copied verbatim
+    /// (as C++ copies its padding); zero by default, as C++ value-initialization leaves it.
+    pub padding: [u8; 2],
     pub recenter_count: u64,
 }
 
@@ -196,6 +199,7 @@ impl Default for VrRenderSettings {
             quirks: Quirks::default(),
             enable_gaze_input_focus: CBool::TRUE,
             force_zoom: CBool::FALSE,
+            padding: [0; 2],
             recenter_count: 0,
         }
     }
@@ -208,6 +212,9 @@ pub struct VrLayer {
     pub pose: VrPose,
     pub physical_size: SizeF32,
     pub enable_gaze_zoom: CBool,
+    /// C++ implicit padding, explicit here so every byte is initialized and copied verbatim
+    /// (as C++ copies its padding); zero by default, as C++ value-initialization leaves it.
+    pub padding: [u8; 3],
     pub zoom_scale: f32,
     pub gaze_target_scale: GazeTargetScale,
     pub opacity: VrOpacitySettings,
@@ -220,6 +227,7 @@ impl Default for VrLayer {
             pose: VrPose::default(),
             physical_size: SizeF32::default(),
             enable_gaze_zoom: CBool::TRUE,
+            padding: [0; 3],
             zoom_scale: 2.0,
             gaze_target_scale: GazeTargetScale::default(),
             opacity: VrOpacitySettings::default(),
@@ -255,6 +263,9 @@ impl Default for Config {
 pub struct LayerConfig {
     pub layer_id: u64,
     pub vr_enabled: CBool,
+    /// C++ implicit padding, explicit here so every byte is initialized and copied verbatim
+    /// (as C++ copies its padding); zero by default, as C++ value-initialization leaves it.
+    pub padding: [u8; 3],
     pub vr: VrLayer,
 }
 
@@ -268,6 +279,9 @@ pub struct Frame {
     pub config: Config,
     pub layers: [LayerConfig; MAX_VIEW_COUNT],
     pub layer_count: u32,
+    /// C++ implicit padding, explicit here so every byte is initialized and copied verbatim
+    /// (as C++ copies its padding); zero by default, as C++ value-initialization leaves it.
+    pub padding: [u8; 4],
 }
 
 /// C++ `SHM::Wire::SharedData`.

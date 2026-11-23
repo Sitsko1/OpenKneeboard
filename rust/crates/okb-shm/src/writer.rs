@@ -161,6 +161,8 @@ impl Drop for WriterGuard<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::mem::offset_of;
+
     use super::*;
     use crate::Version;
 
@@ -274,6 +276,63 @@ mod tests {
         assert_eq!(h.magic, crate::wire::MAGIC);
         assert_eq!(h.frame_number, 0);
         assert_ne!(h.session_id, old.session_id);
+    }
+
+    /// Byte ranges of the implicit C++ padding in `frames[frame]`, found from the neighboring
+    /// fields' offsets.
+    fn frame_padding(frame: usize) -> Vec<std::ops::Range<usize>> {
+        use crate::wire::{VrLayer, VrRenderSettings};
+        let base = offset_of!(SharedData, frames) + frame * size_of::<Frame>();
+        let vr = base + offset_of!(Frame, config) + offset_of!(Config, vr);
+        let mut ranges = vec![
+            vr + offset_of!(VrRenderSettings, force_zoom) + 1
+                ..vr + offset_of!(VrRenderSettings, recenter_count),
+            base + offset_of!(Frame, layer_count) + 4..base + size_of::<Frame>(),
+        ];
+        for i in 0..MAX_VIEW_COUNT {
+            let layer = base + offset_of!(Frame, layers) + i * size_of::<LayerConfig>();
+            let vr = layer + offset_of!(LayerConfig, vr);
+            ranges.push(layer + offset_of!(LayerConfig, vr_enabled) + 1..vr);
+            ranges.push(
+                vr + offset_of!(VrLayer, enable_gaze_zoom) + 1
+                    ..vr + offset_of!(VrLayer, zoom_scale),
+            );
+        }
+        ranges
+    }
+
+    fn assert_zero(bytes: &[u8], ranges: &[std::ops::Range<usize>]) {
+        for r in ranges {
+            assert!(
+                bytes[r.clone()].iter().all(|&b| b == 0),
+                "padding {r:?}: {:x?}",
+                &bytes[r.clone()]
+            );
+        }
+    }
+
+    // C++ value-initializes the header and frame, so padding is zero; the Rust writer used to
+    // copy stack garbage there (found by SHMParity.* in src/tests/SHMParity_test.cpp).
+    #[test]
+    fn padding_bytes_are_written_as_zero() {
+        let (mut w, _) = writer("padding", 1);
+        w.mapping.fill_from(offset_of!(SharedData, frames), 0xFF);
+        let mut g = w.lock();
+        let info = g.begin_frame();
+        g.submit_frame(info, &Config::default(), &[layer(1), layer(2)], 1, 2);
+        assert_zero(
+            &g.writer.mapping.bytes(),
+            &frame_padding(usize::from(info.texture_index)),
+        );
+
+        g.writer
+            .mapping
+            .fill_from(offset_of!(SharedData, frames), 0xFF);
+        g.detach();
+        let bytes = g.writer.mapping.bytes();
+        for frame in 0..SWAPCHAIN_LENGTH {
+            assert_zero(&bytes, &frame_padding(frame));
+        }
     }
 
     #[test]

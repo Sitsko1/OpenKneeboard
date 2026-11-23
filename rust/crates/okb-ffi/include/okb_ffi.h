@@ -77,6 +77,11 @@ typedef struct OkbVrRenderSettings {
   struct OkbQuirks quirks;
   OkbCBool enable_gaze_input_focus;
   OkbCBool force_zoom;
+  /**
+   * C++ implicit padding, explicit here so every byte is initialized and copied verbatim
+   * (as C++ copies its padding); zero by default, as C++ value-initialization leaves it.
+   */
+  uint8_t padding[2];
   uint64_t recenter_count;
 } OkbVrRenderSettings;
 
@@ -165,6 +170,11 @@ typedef struct OkbVrLayer {
   struct OkbVrPose pose;
   struct OkbSizeF32 physical_size;
   OkbCBool enable_gaze_zoom;
+  /**
+   * C++ implicit padding, explicit here so every byte is initialized and copied verbatim
+   * (as C++ copies its padding); zero by default, as C++ value-initialization leaves it.
+   */
+  uint8_t padding[3];
   float zoom_scale;
   struct OkbGazeTargetScale gaze_target_scale;
   struct OkbVrOpacitySettings opacity;
@@ -177,6 +187,11 @@ typedef struct OkbVrLayer {
 typedef struct OkbLayerConfig {
   uint64_t layer_id;
   OkbCBool vr_enabled;
+  /**
+   * C++ implicit padding, explicit here so every byte is initialized and copied verbatim
+   * (as C++ copies its padding); zero by default, as C++ value-initialization leaves it.
+   */
+  uint8_t padding[3];
   struct OkbVrLayer vr;
 } OkbLayerConfig;
 

@@ -87,6 +87,21 @@ impl Mapping {
         self.view
     }
 
+    /// Test-only: a copy of every byte of the view.
+    #[cfg(test)]
+    pub(crate) fn bytes(&self) -> Vec<u8> {
+        // SAFETY: the view is `size` readable bytes; pagefile-backed pages are initialized.
+        unsafe { std::slice::from_raw_parts(self.view, self.size) }.to_vec()
+    }
+
+    /// Test-only: sets every byte of the view from `offset` on to `byte`.
+    #[cfg(test)]
+    pub(crate) fn fill_from(&self, offset: usize, byte: u8) {
+        assert!(offset <= self.size);
+        // SAFETY: the view is `size` writable bytes, and `offset <= size` (asserted).
+        unsafe { self.view.add(offset).write_bytes(byte, self.size - offset) }
+    }
+
     /// Copies the `SharedData` header out of the view. The caller must hold the SHM mutex (or
     /// be the sole user).
     ///
