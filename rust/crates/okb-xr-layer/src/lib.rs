@@ -2,9 +2,8 @@
 //! hooks and instance/session lifecycle, ported from
 //! `src/injectables/OpenXRKneeboard.cpp`.
 //!
-//! This is an FFI boundary module, so it may use `unsafe`; every other module
-//! that may not opts out with `#![forbid(unsafe_code)]`.
-#![allow(unsafe_code)]
+//! The FFI items here carry their own `#[allow(unsafe_code)]`; modules that
+//! must not use `unsafe` opt out with `#![forbid(unsafe_code)]`.
 
 /// Casts a hook or fake to `PFN_xrVoidFunction`, as `xrGetInstanceProcAddr`
 /// returns it.
@@ -16,6 +15,7 @@ macro_rules! void_fn {
     };
 }
 
+pub mod compose;
 pub mod identity;
 mod next;
 #[cfg(test)]
@@ -59,6 +59,7 @@ pub(crate) struct LayerState {
 
 pub(crate) static STATE: Mutex<Option<LayerState>> = Mutex::new(None);
 
+#[allow(unsafe_code)]
 fn log(message: &str) {
     let wide: Vec<u16> = format!("OpenKneeboard-OpenXR-Rust: {message}\n")
         .encode_utf16()
@@ -105,6 +106,7 @@ fn copy_str(dst: &mut [c_char], src: &str) {
     }
 }
 
+#[allow(unsafe_code)]
 pub(crate) unsafe extern "system" fn xr_create_session(
     instance: xr::Instance,
     create_info: *const xr::SessionCreateInfo,
@@ -181,6 +183,7 @@ pub(crate) unsafe extern "system" fn xr_create_session(
     })
 }
 
+#[allow(unsafe_code)]
 pub(crate) unsafe extern "system" fn xr_destroy_session(session: xr::Session) -> xr::Result {
     guard(|| {
         let next = {
@@ -194,6 +197,7 @@ pub(crate) unsafe extern "system" fn xr_destroy_session(session: xr::Session) ->
     })
 }
 
+#[allow(unsafe_code)]
 pub(crate) unsafe extern "system" fn xr_destroy_instance(instance: xr::Instance) -> xr::Result {
     guard(|| {
         let next = {
@@ -207,6 +211,7 @@ pub(crate) unsafe extern "system" fn xr_destroy_instance(instance: xr::Instance)
     })
 }
 
+#[allow(unsafe_code)]
 pub(crate) unsafe extern "system" fn xr_end_frame(
     session: xr::Session,
     frame_end_info: *const xr::FrameEndInfo,
@@ -215,6 +220,7 @@ pub(crate) unsafe extern "system" fn xr_end_frame(
     guard(|| unsafe { next().end_frame.expect("xrEndFrame")(session, frame_end_info) })
 }
 
+#[allow(unsafe_code)]
 pub(crate) unsafe extern "system" fn xr_enumerate_api_layer_properties(
     property_capacity_input: u32,
     property_count_output: *mut u32,
@@ -244,6 +250,7 @@ pub(crate) unsafe extern "system" fn xr_enumerate_api_layer_properties(
     })
 }
 
+#[allow(unsafe_code)]
 pub(crate) unsafe extern "system" fn xr_enumerate_instance_extension_properties(
     layer_name: *const c_char,
     property_capacity_input: u32,
@@ -287,6 +294,7 @@ pub(crate) unsafe extern "system" fn xr_enumerate_instance_extension_properties(
     })
 }
 
+#[allow(unsafe_code)]
 pub(crate) unsafe extern "system" fn xr_get_instance_proc_addr(
     instance: xr::Instance,
     name: *const c_char,
@@ -335,6 +343,7 @@ pub(crate) unsafe extern "system" fn xr_get_instance_proc_addr(
     })
 }
 
+#[allow(unsafe_code)]
 pub(crate) unsafe extern "system" fn xr_create_api_layer_instance(
     info: *const xr::InstanceCreateInfo,
     layer_info: *const xr::ApiLayerCreateInfo,
@@ -404,7 +413,7 @@ pub(crate) unsafe extern "system" fn xr_create_api_layer_instance(
 /// # Safety
 /// Called by the OpenXR loader: `layer_name` is NUL-terminated and
 /// `api_layer_request` is valid.
-#[allow(non_snake_case)]
+#[allow(non_snake_case, unsafe_code)]
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn OpenKneeboard_xrNegotiateLoaderApiLayerInterface(
     _loader_info: *const xr::NegotiateLoaderInfo,

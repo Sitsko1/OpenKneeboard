@@ -48,6 +48,7 @@ name = "okb-xr-layer"
 version = "0.1.0"
 dependencies = [
  "okb-shm",
+ "okb-vr",
  "openxr-sys",
  "windows-sys",
 ]

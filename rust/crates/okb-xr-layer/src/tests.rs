@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
 

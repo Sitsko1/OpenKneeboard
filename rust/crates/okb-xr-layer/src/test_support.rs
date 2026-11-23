@@ -1,5 +1,6 @@
 //! A fake "next" layer/runtime for the in-crate tests: records what the layer
 //! forwards so the tests can check it passed calls through untouched.
+#![allow(unsafe_code)]
 
 use std::cell::RefCell;
 use std::ffi::{CStr, c_char};
