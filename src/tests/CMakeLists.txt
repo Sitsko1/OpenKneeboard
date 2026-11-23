@@ -8,6 +8,8 @@ add_executable(
   RayIntersectsRect_test.cpp
   VRKneeboard_test.cpp
   SHM_test.cpp
+  SHMLayout_test.cpp
+  SHMParity_test.cpp
   PluginManifest_test.cpp
   VRSettings_test.cpp
   # ponytail: compiled directly rather than linking OpenKneeboard-App-Common,
@@ -19,11 +21,13 @@ target_include_directories(
   OpenKneeboard-Tests
   PRIVATE
   ../app/app-common/include
+  ../../rust/crates/okb-ffi/include
 )
 target_compile_definitions(
   OpenKneeboard-Tests
   PRIVATE
   "OKB_TEST_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
+  "OKB_RUST_DIR=\"${CMAKE_SOURCE_DIR}/rust\""
 )
 target_link_libraries(
   OpenKneeboard-Tests
@@ -37,6 +41,8 @@ target_link_libraries(
   OpenKneeboard-config
   OpenKneeboard-json
   OpenKneeboard-semver
+  OpenKneeboard-version
+  okb_ffi
   ThirdParty::CppWinRT
   ThirdParty::JSON
 )

@@ -81,8 +81,16 @@ jobs:
         run: rustup toolchain install
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest,cargo-llvm-cov
+          tool: cargo-nextest,cargo-llvm-cov,cbindgen@0.29.4
       - run: cargo clippy --all-targets
+      - run: cargo build --workspace --target i686-pc-windows-msvc
+      - run: cargo nextest run -p okb-shm --target i686-pc-windows-msvc
+      - name: Check okb-ffi header is up to date
+        working-directory: rust/crates/okb-ffi
+        run: |
+          cbindgen --config cbindgen.toml --output include/okb_ffi.h
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git diff --exit-code include
       - run: cargo fmt --check
       - name: Run tests with coverage
         run: |
@@ -124,6 +132,9 @@ jobs:
             -Name GitHubPackages `
             -UserName "${{ env.USERNAME }}" `
             -Password "${{ secrets.GITHUB_TOKEN }}"
+      - name: Install Rust toolchain from rust-toolchain.toml
+        working-directory: source/rust
+        run: rustup toolchain install
       - name: Make build directory
         run: cmake -E make_directory build
       - name: Configure

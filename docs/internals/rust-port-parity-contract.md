@@ -43,12 +43,14 @@ Parity is judged on two observable outputs. Internal structure, threading, and c
 - **Logging and tracing:** wording, event names, and which events are emitted (`dprint`, TraceLogging) may differ.
 - **Timing:** CPU time per call may differ, but it must not regress beyond the R4 budget (0.5 ms CPU in `xrEndFrame`).
 - **Rust-internal error handling:** may replace C++ exceptions, *as long as the observable result is the same* (for example, a C++ path that throws and terminates must still terminate in Phase 1; changing that is Phase 2).
+- **Out-of-range layer count:** The Rust reader clamps a peer-written `mLayerCount` above `MaxViewCount` (16) to 16 when copying layers; the C++ reader reads out of bounds there. A valid writer never exceeds 16 (the C++ writer `fatal()`s first).
+- **Padding bytes:** Padding bytes have no defined value. The C++ writer copies a temporary whose trailing `Frame` padding is indeterminate (0xCC in Debug builds, stack contents in Release), so the differential harness masks the trailing padding of each `SharedData::Frame` slot along with `mSessionID`. The Rust writer always writes zeros there.
 
 ## How parity is measured
 
 Both harnesses are built in Phase 1.
 
-- **SHM differential harness:** feeds an identical script of writer actions to the C++ and the Rust writers (in-process, through `okb-ffi`) and reads back with both readers in all four writer/reader combinations. It compares every `MaybeGet()` result field by field, and compares the bytes of both mappings (frame SHM and ActiveConsumers) after each step. The scripts start with the scenarios in `src/tests/SHM_test.cpp` and add multi-layer frames, swapchain wrap-around, and detach and reattach.
+- **SHM differential harness:** feeds an identical script of writer actions to the C++ and the Rust writers (in-process, through `okb-ffi`) and reads back with both readers in all four writer/reader combinations. It compares every `MaybeGet()` result field by field, compares the bytes of the frame SHM after each step, and, for each consumer kind, which `ActiveConsumers` timestamp field a passing read sets (the timestamps themselves differ from run to run). The scripts start with the scenarios in `src/tests/SHM_test.cpp` and add multi-layer frames, swapchain wrap-around, and detach and reattach. The byte comparison masks `mSessionID`, which is random per writer and per detach, and the trailing padding of each frame slot (see "Acceptable differences"); every other byte must match. Implemented as `SHMParity.*` in `src/tests/SHMParity_test.cpp`.
 - **Layer recorded-frame comparison:** runs `hello_xr` with `test-feeder` publishing a fixed set of layers (including more layers than the runtime allows, and a global-input layer that is not last in SHM order), once with the C++ layer and once with the Rust layer (selected by the C++/Rust layer switch). An OpenXR capture layer, or a debug trace from each layer, records the appended quads per `xrEndFrame`. Phase 1 passes when every recorded frame matches under the rules above.
 - **Unit tests:** the C++ characterization tests in `src/tests/` (`VRKneeboard_test.cpp`, `RayIntersectsRect_test.cpp`, `SHM_test.cpp`) are mirrored in Rust with the same inputs and expected values.
 
@@ -62,6 +64,7 @@ Characterization tests found these behaviors. They may look wrong, but Phase 1 k
 - `SHMTest.GpuMismatchCharacterization`: the GPU check comes before the layer-count check. A reader on the wrong GPU gets `IncorrectGPU` even for a zero-layer frame, while a reader on the right GPU gets `NoLayers`. A wrong-GPU reader also skips `ActiveConsumers::Set`.
 - `VRKneeboard.FirstFrameDoesNotRecenter`: no recenter happens until `mRecenterCount` changes from 0. Before the first recenter, kneeboards are placed relative to the tracking-space origin, with eye height taken from the first headset pose ever seen.
 - `SHM::Writer` (observed in code): constructing a writer unconditionally resets the whole shared header, even if another writer is live.
+- `ActiveConsumers::Set(OpenXR_D3D12)` sets `mOpenXR_D3D11`, not `mOpenXR_D3D12`, so D3D12 consumers are reported as D3D11 and `mOpenXR_D3D12` is never set. Pinned by Rust test `d3d12_consumer_sets_d3d11_timestamp_quirk` and by `SHMParity.ActiveConsumers`.
 
 ## Changes deferred to Phase 2
 
