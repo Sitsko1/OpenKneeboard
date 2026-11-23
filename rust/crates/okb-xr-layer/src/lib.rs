@@ -16,6 +16,7 @@ macro_rules! void_fn {
 }
 
 pub mod compose;
+pub mod d3d11;
 pub mod identity;
 mod next;
 #[cfg(test)]
