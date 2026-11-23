@@ -162,7 +162,7 @@ jobs:
           $version="$(Get-Content version.txt)"
           Add-Content $Env:GITHUB_OUTPUT "VERSION=${version}"
           echo "::endgroup::"
-      - name: Check Rust OpenXR layer exports
+      - name: Check Rust OpenXR layer exports and JSONs
         # Both bitnesses must export the undecorated name that the layer JSONs
         # name; the 32-bit one only does so through the .def file.
         shell: pwsh
@@ -181,6 +181,20 @@ jobs:
             }
             "${dll}: exports OpenKneeboard_xrNegotiateLoaderApiLayerInterface"
           }
+          # The Rust layer JSONs must name the same layer as the C++ JSON, and
+          # point at a DLL that exists next to them.
+          $expected = (Get-Content OpenKneeboard-OpenXR.json -Raw | ConvertFrom-Json).api_layer.name
+          foreach ($json in 'OpenKneeboard-OpenXR-Rust.json', 'OpenKneeboard-OpenXR-Rust32.json') {
+            $layer = (Get-Content $json -Raw | ConvertFrom-Json).api_layer
+            if ($layer.name -ne $expected) {
+              throw "${json}: api_layer.name is '$($layer.name)', expected '$expected'"
+            }
+            $library = Join-Path (Split-Path -Parent (Resolve-Path $json)) $layer.library_path
+            if (-not (Test-Path $library -PathType Leaf)) {
+              throw "${json}: library_path '$($layer.library_path)' does not exist"
+            }
+            "${json}: name '$($layer.name)', library_path '$($layer.library_path)'"
+          }
       - name: Install OpenCppCoverage
         if: ${{ matrix.config == 'Debug' }}
         shell: pwsh
@@ -190,6 +204,10 @@ jobs:
       - name: Run C++ tests with coverage
         if: ${{ matrix.config == 'Debug' }}
         shell: pwsh
+        env:
+          # Inherited through OpenCppCoverage and ctest: the OpenXR layer
+          # parity tests fail, rather than skip, without a usable D3D11 adapter.
+          OKB_REQUIRE_D3D11_HARNESS: "1"
         run: |
           $out = source/scripts/coverage-cpp.ps1 -BuildDir ${{github.workspace}}/build -Config Debug
           $code = $LASTEXITCODE
