@@ -106,9 +106,14 @@ bool VRSettingsPage::OpenXR64Enabled() noexcept {
   for (const auto file:
        {RuntimeFiles::OPENXR_64BIT_JSON,
         RuntimeFiles::OPENXR_64BIT_RUST_JSON}) {
+    // A missing JSON is "not enabled"; the throwing overload would
+    // terminate in this noexcept getter.
+    std::error_code ec;
     const auto jsonPath = std::filesystem::canonical(
-                            RuntimeFiles::GetInstallationDirectory() / file)
-                            .wstring();
+      RuntimeFiles::GetInstallationDirectory() / file, ec);
+    if (ec) {
+      continue;
+    }
     if (IsOpenXRAPILayerEnabled(jsonPath, RRF_SUBKEY_WOW6464KEY)) {
       return true;
     }
@@ -121,9 +126,14 @@ bool VRSettingsPage::OpenXR32Enabled() noexcept {
   for (const auto file:
        {RuntimeFiles::OPENXR_32BIT_JSON,
         RuntimeFiles::OPENXR_32BIT_RUST_JSON}) {
+    // A missing JSON is "not enabled"; the throwing overload would
+    // terminate in this noexcept getter.
+    std::error_code ec;
     const auto jsonPath = std::filesystem::canonical(
-                            RuntimeFiles::GetInstallationDirectory() / file)
-                            .wstring();
+      RuntimeFiles::GetInstallationDirectory() / file, ec);
+    if (ec) {
+      continue;
+    }
     if (IsOpenXRAPILayerEnabled(jsonPath, RRF_SUBKEY_WOW6432KEY)) {
       return true;
     }
