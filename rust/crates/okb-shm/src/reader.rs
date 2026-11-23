@@ -261,6 +261,64 @@ mod tests {
     }
 
     #[test]
+    fn abandoned_mutex_resets_header() {
+        use crate::win32::{LockOutcome, NamedMutex};
+        let names = names("abandoned");
+        let mut w = Writer::new(&names, 1).unwrap();
+        {
+            let mut g = w.lock();
+            let info = g.begin_frame();
+            g.submit_frame(info, &Config::default(), &[], 0, 0);
+        }
+        let mut r = reader(&names, 1);
+        let old = r.mapping.read_header();
+        assert!(old.have_feeder());
+        let mutex_name = names.mutex.clone();
+        std::thread::spawn(move || {
+            let m = NamedMutex::open(&mutex_name).unwrap();
+            assert_eq!(m.lock().unwrap(), LockOutcome::Acquired);
+            // exit without unlocking
+        })
+        .join()
+        .unwrap();
+        // The unlocked quick check still sees the feeder; the locked path hits the reset.
+        assert_eq!(frame_err(r.maybe_get()), FrameError::NoFeeder);
+        let h = r.mapping.read_header();
+        assert!(!h.have_feeder());
+        assert_eq!(h.magic, crate::wire::MAGIC);
+        assert_eq!(h.frame_number, 0);
+        assert_ne!(h.session_id, old.session_id);
+    }
+
+    /// Pins the current INFINITE wait (parity contract); Phase 2 inverts this test.
+    #[test]
+    fn reader_blocks_while_writer_holds_lock() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let names = names("blocks");
+        let mut w = Writer::new(&names, 1).unwrap();
+        {
+            let mut g = w.lock();
+            let info = g.begin_frame();
+            g.submit_frame(info, &Config::default(), &[], 0, 0);
+        }
+        let (tx, rx) = mpsc::channel();
+        let guard = w.lock();
+        let reader_names = names.clone();
+        let t = std::thread::spawn(move || {
+            let mut r = reader(&reader_names, 1);
+            tx.send(frame_err(r.maybe_get())).unwrap();
+        });
+        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+        drop(guard);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            FrameError::NoLayers
+        );
+        t.join().unwrap();
+    }
+
+    #[test]
     fn error_precedence_matches_cpp() {
         let names = names("precedence");
         let mut wrong = reader(&names, 1);
