@@ -293,6 +293,13 @@ void DisableLegacyApiLayers(SetupEventArgs args)
     var installedPath = Path.GetFullPath(args.InstallDir + @"\bin\OpenKneeboard-OpenXR.json");
 
     DisableLegacyApiLayersInRoot(Registry.LocalMachine, pathToKeep: installedPath);
+
+    // The custom action is 64-bit, so the above only covers the 64-bit view;
+    // the 32-bit layers (C++ and Rust) are registered in WOW6432Node.
+    var installedPath32 = Path.GetFullPath(args.InstallDir + @"\bin\OpenKneeboard-OpenXR32.json");
+    using var hklm32 = RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, RegistryView.Registry32);
+    DisableLegacyApiLayersInRoot(hklm32, pathToKeep: installedPath32);
+
     foreach (var name in Registry.Users.GetSubKeyNames())
     {
         var user = Registry.Users.OpenSubKey(name, writable: true);

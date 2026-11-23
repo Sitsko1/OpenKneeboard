@@ -19,7 +19,7 @@ The Rust layer supports **D3D11 only** until Phases 1c (D3D12) and 1d (Vulkan). 
 
 Enabling one implementation disables the other (and any stale registrations of the same JSON); turning OpenXR off disables both. To go back, set `"OpenXRLayer": "Cpp"` (or remove the field) and toggle OpenXR off and on again.
 
-The installer re-registers the C++ layer on upgrade, so repeat step 3 after updating.
+An install or upgrade re-registers the C++ layer for both bitnesses and disables the Rust layer, so re-select Rust afterward (toggle OpenXR off, then on, as in step 3).
 
 ## Manual hardware checklist
 
