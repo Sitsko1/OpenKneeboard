@@ -8,3 +8,4 @@ docs/vendor
 out/
 .idea/
 *~
+/rust/target/

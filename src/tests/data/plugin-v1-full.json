@@ -1,0 +1,30 @@
+{
+  "ID": "testplugin.openkneeboard-tests.invalid",
+  "Metadata": {
+    "PluginName": "Test Plugin",
+    "PluginReadableVersion": "v1.2 (test)",
+    "PluginSemanticVersion": "1.2.0",
+    "OKBMinimumVersion": "1.10",
+    "OKBMaximumTestedVersion": "1.13.0",
+    "Author": "OpenKneeboard tests",
+    "Website": "https://openkneeboard-tests.invalid/"
+  },
+  "TabTypes": [
+    {
+      "ID": "testplugin.openkneeboard-tests.invalid;dashboard",
+      "Name": "Test Dashboard",
+      "Glyph": "\uE80F",
+      "Implementation": "WebBrowser",
+      "ImplementationArgs": {
+        "URI": "plugin://index.html",
+        "InitialSize": { "Width": 800, "Height": 1200 }
+      },
+      "CustomActions": [
+        {
+          "ID": "testplugin.openkneeboard-tests.invalid;dashboard;reset",
+          "Name": "Reset"
+        }
+      ]
+    }
+  ]
+}
