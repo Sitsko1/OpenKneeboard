@@ -55,3 +55,4 @@ Measured 2026-11-22 at commit `1930c053`.
 | C++ line coverage, `src/` (OpenCppCoverage, modules loaded by tests) | 34.58% (546/1579) |
 | C++ line coverage of all `src/` C++ lines (546 ÷ 43,982 lines in `src/**/*.cpp`, excluding `src/tests`) | 1.24% |
 | Rust line coverage | n/a (0/0): `okb-shm` holds only constants; its test is in `tests/` |
+| Rust line coverage after Phase 1a (`cargo llvm-cov`, measured at commit `7b852520`) | 78.65% (840/1068) |

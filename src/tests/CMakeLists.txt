@@ -41,6 +41,7 @@ target_link_libraries(
   OpenKneeboard-config
   OpenKneeboard-json
   OpenKneeboard-semver
+  OpenKneeboard-version
   okb_ffi
   ThirdParty::CppWinRT
   ThirdParty::JSON
