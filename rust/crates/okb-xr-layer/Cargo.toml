@@ -1,0 +1,17 @@
+[package]
+name = "okb-xr-layer"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+okb-shm = { path = "../okb-shm" }
+openxr-sys = "0.11"
+windows-sys = { version = "0.61", features = ["Win32_System_Diagnostics_Debug"] }
