@@ -72,7 +72,7 @@ Characterization tests found these behaviors. They may look wrong, but Phase 1 k
 - `VRKneeboard.FirstFrameDoesNotRecenter`: no recenter happens until `mRecenterCount` changes from 0. Before the first recenter, kneeboards are placed relative to the tracking-space origin, with eye height taken from the first headset pose ever seen.
 - `SHM::Writer` (observed in code): constructing a writer unconditionally resets the whole shared header, even if another writer is live.
 - `ActiveConsumers::Set(OpenXR_D3D12)` sets `mOpenXR_D3D11`, not `mOpenXR_D3D12`, so D3D12 consumers are reported as D3D11 and `mOpenXR_D3D12` is never set. Pinned by Rust test `d3d12_consumer_sets_d3d11_timestamp_quirk` and by `SHMParity.ActiveConsumers`.
-- OpenXR layer sprite atlas: atlas sizes are computed from all frame layers but indexed by VR-layer index. The atlas cache key is the texture size only; it ignores the layer count and layer sizes. A frame that adds a layer without changing the texture size therefore indexes past its cached atlas and terminates the game (both layers). Pinned by the `AtlasResize` script, which changes the texture size.
+- OpenXR layer sprite atlas: atlas sizes are computed from all frame layers but indexed by VR-layer index. The atlas cache key is the texture size only; it ignores the layer count and layer sizes. A frame that adds a layer without changing the texture size therefore indexes past its cached atlas and terminates the game (both layers). Not exercised by the harness: the `AtlasResize` script avoids it by changing the texture size whenever it adds a layer.
 - OpenXR layer HMD pose cache: it is process-static and keyed on `displayTime`. A `displayTime` of 0 returns the default pose without locating.
 
 ## Changes deferred to Phase 2

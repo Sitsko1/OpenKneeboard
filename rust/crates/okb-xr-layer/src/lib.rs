@@ -55,9 +55,13 @@ const _: () = assert!(LAYER_DESCRIPTION.len() <= xr::MAX_API_LAYER_DESCRIPTION_S
 pub(crate) struct SessionKneeboard(pub(crate) kneeboard::Kneeboard);
 
 // SAFETY: `ShmClient` (`Rc`, boxed callback) and the D3D11 interfaces are not
-// `Send`. As in C++, every layer call for a session (create, end frame,
-// destroy) comes from the game's frame thread, serialized by the `STATE` mutex,
-// so the kneeboard is only ever touched from that one thread.
+// `Send`. The kneeboard owns its whole `Rc` graph: every `Rc` clone and the
+// boxed callback live inside it, so moving the whole value to another thread
+// cannot leave a clone behind on the old one. Access is serialized: either
+// under the `STATE` lock, or by taking the value out of `STATE` so only one
+// thread holds it. That matters because the OpenXR spec only requires external
+// synchronization, so `xrDestroySession` may arrive on a thread other than the
+// frame thread. (The take-out/put-back limit is noted in `xr_end_frame`.)
 #[allow(unsafe_code)]
 unsafe impl Send for SessionKneeboard {}
 
