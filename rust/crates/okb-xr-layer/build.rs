@@ -3,6 +3,19 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=OpenKneeboard-OpenXR-Rust.def");
+    // Identity from CMake (src/identity.rs reads these with option_env!).
+    for var in [
+        "OKB_OPENXR_LAYER_NAME",
+        "OKB_OPENXR_LAYER_DESCRIPTION",
+        "OKB_OPENXR_LAYER_IMPL_VERSION",
+        "OKB_REVERSE_DOMAIN",
+        "OKB_VERSION_MAJOR",
+        "OKB_VERSION_MINOR",
+        "OKB_VERSION_PATCH",
+        "OKB_VERSION_BUILD",
+    ] {
+        println!("cargo:rerun-if-env-changed={var}");
+    }
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         println!("cargo:rustc-cdylib-link-arg=/DEF:{dir}/OpenKneeboard-OpenXR-Rust.def");

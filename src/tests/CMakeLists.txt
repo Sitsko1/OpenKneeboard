@@ -12,6 +12,7 @@ add_executable(
   SHM_test.cpp
   SHMLayout_test.cpp
   SHMParity_test.cpp
+  OpenXRLayerLoad_test.cpp
   PluginManifest_test.cpp
   VRSettings_test.cpp
   # ponytail: compiled directly rather than linking OpenKneeboard-App-Common,
@@ -30,7 +31,10 @@ target_compile_definitions(
   PRIVATE
   "OKB_TEST_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
   "OKB_RUST_DIR=\"${CMAKE_SOURCE_DIR}/rust\""
+  "OKB_TEST_CPP_LAYER_DLL=\"$<TARGET_FILE:OpenKneeboard-OpenXR>\""
+  "OKB_TEST_RUST_LAYER_DLL=\"$<GENEX_EVAL:$<TARGET_PROPERTY:OpenKneeboard-OpenXR-Rust,OUTPUT_FILE>>\""
 )
+add_dependencies(OpenKneeboard-Tests OpenKneeboard-OpenXR OpenKneeboard-OpenXR-Rust)
 target_link_libraries(
   OpenKneeboard-Tests
   PRIVATE
@@ -46,6 +50,7 @@ target_link_libraries(
   OpenKneeboard-semver
   OpenKneeboard-version
   okb_ffi
+  ThirdParty::OpenXR
   ThirdParty::CppWinRT
   ThirdParty::JSON
 )
